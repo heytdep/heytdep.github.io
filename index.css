@@ -113,10 +113,14 @@ ul {
 }
 
 .math {
-    font-size: 13px;
-    background: #cdcdcd;
-    padding: 3px;
+    font-size: 15px;
+    background: #e5e5e5;
+    padding: 5px;
     border-radius: 2px;
+}
+
+p {
+  font-size: 16px;
 }
 
 #post {
