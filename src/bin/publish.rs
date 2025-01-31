@@ -460,7 +460,7 @@ fn gen_index_content(mut posts: Vec<String>) -> String {
             
             <div class="bio">
                 <p>Co-founder <a target="_blank" href="https://github.com/xycloo/">Xycloo Labs</a>.</p>
-                <p>Working with VMs, cloud computing infra, TEEs and blockchain. Interested in research about VMs, MeV, validators, blockchain microstructure, TEEs, and DeFi.</p>
+                <p>Working with VMs, cloud computing infra, TEEs and blockchain. Interested in research about VMs, MeV, validators, TEEs, and DeFi.</p>
                 <p class="note">Articles with the &#128215 suffix are intended for general public, 
                    &#128216 are personal notes.</p>
             </div>
