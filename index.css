@@ -115,7 +115,7 @@ ul {
 .math {
     font-size: 18px;
     background: #fafafa;
-    padding: 5px;
+    padding: 3px;
     border-radius: 2px;
 }
 
@@ -146,7 +146,7 @@ p {
 }
 
 #post h4 {
-    margin-top: 8em;
+    margin-top: 2em;
 }
 
 .heading h1 {    
@@ -198,9 +198,8 @@ a:link, a:visited, a:active, a:checked {
 }
 
 hr {
-  background-color: var(--color-divider);
-  height: 2px;
-  border:none;
+  height: 0px;
+  margin: 10px;
 }
 
 #doc blockquote, .markdown-body blockquote,
