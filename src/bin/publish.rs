@@ -136,7 +136,7 @@ fn build_handler(name: String) {
     </script>
     <style>
     code {{
-    background-color: #cdcdcd;
+    background-color: #e4e4e4;
     padding: 2px;
     border-radius: 5px;
     max-height: 800px;
