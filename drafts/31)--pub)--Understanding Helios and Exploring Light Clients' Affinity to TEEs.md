@@ -309,32 +309,44 @@ We’re now ready to make some considerations that are TEE specific.
 
 # TEE considerations
 
-### **On the weak subjective checkpoint**
+## **On the weak subjective checkpoint**
 
 The bootstrapping checkpoint should be signed and published by the TEE. This allows anyone to verify that the light client was bootstrapped at a certain point in time using a checkpoint from another point in time. Depending on whether the checkpoint is valid and not vulnerable to not necessarily theoretical mathematical attacks other nodes can decide to join the P2P network of light clients. Kettles that are replicating and not bootstrapping should request the checkpoint from other kettles, there should be at least one kettle (the bootstrapping one) ready to hand out the checkpoint.
 
-### **On RPCs**
+## **On RPCs**
 
 Since the light client can verify RPC data for both consensus and execution, the RPCs used should obviously be configurable by the operator; potentially also at runtime. We already rely on the operator for availability of said light client, so we also trust the operator to use RPCs that are available; runtime switching can come really in handy if the RPC providers turn out to be unavailable or not reliant. This implies that the host has some level of authentication within the TD that enables them to swap rpc providers mid-execution with a handle to switch providers. This doesn’t decrease security. Additionally, helios should have some built-in redundancy to provide higher guarantees without having to re-sync. The very responsive helios team is already working on this! [https://github.com/a16z/helios/issues/574](https://github.com/a16z/helios/issues/574)
 
-### **On timestamps**
+## **On timestamps**
 
 Helios requires a handle over the current system timestamp in a handful of situations. The first one to get out of the way is the bootstrapping. Helios holds logic to force the checkpoint to be resistant to worst-case scenario theoretical attacks. This logic would be enforced within the measurement. However, this logic relies on the timestamp. Timestamps are generally untrusted territory within TEEs like TDX. Assuming we’re using `kvmclock` a malicious host could bootstrap with an old checkpoint opening up doors for practical attacks to infer malicious chain state in the light client and producing potentially malicious downstream data. Since on 1 we said we want to rely on social layer to choose which network to join, this is not an issue. A visibly old checkpoint will be considered as an attempt to bootstrap to a potentially invalid state and such node will not be joined; but some designs may not rely on this logic and could require e.g the bootstrapping to be done on a hardcoded rpc which was known to work correctly at bootstrap time taking that as a root of trust as well. Other attack vectors, e.g in `get_updates` are mainly harming availability by e.g keeping the node at an older state by fiddling with the `expected_current_slot` . This could be potentially harming in an application as well, but can be solved by introducing redundancy in the light clients and allowing any light client to check the messages produced by each other, and if a malicious host tries to submit old state as valid the other nodes can prove that the state was old. These can be pretty easily solved by disabling `kvmclock` and using the virtual TSC provided by TDX; safeguarded by an NTP setup on bootstrap. More on this here.
 
 
-### **On reorgs**
+## **On reorgs**
 
 As explained perviously, handling re-orgs is not something that in inherent behavior of the light client itself. The light client relies on a beacon node to infer the canonical fork, but as shown in the above section, the beacon node shares both a finalized view and an optimistic one. The light client might choose to rely on the optimistic view, but in case of a reorg of said optimistic view, the light client will update its view to follow the one inferred by the new finalized view derived from the beacon node. This means that the light client’s internal view was wrong at a certain point in time. Reorgs are handled automatically by deriving view from the beacon node, but if basing the application’s view on one that can be rolled back is not an option for the application then having the verification happen on a finalized view can be safer. Note that transactions in reorg’d block are rolled back and included in a later block it doesn’t mean they are malicious so it depends on what the application rules require. The application might also choose to combine both optimistic and finalize views for operations of different validity.
 
-#### Reducing Reorg Impact Probability
+### Reducing Reorg Impact Probability
 
 One approach to reducing the probability of having internal application state impacted by the reorg is to require at least *n* optimistic block before we deem block `CURRENT - n` valid. If `n > 1` then we already greatly reduce the probability of a reorg impacting our internal application logic at the expense of lagging *n* slots behind. This approach works for tasks that need an optimistic view of the network with higher probability of being valid but where such view doesn't perform critical actions.
 
-#### Caching optimistic views
+### Caching optimistic views
 
 This approach if for application state that is more critical but does not necessarily have a chained effect, i.e can be updated given an optimistic view but in case a reorg happens it's not a vulnerability to re-update such state to account for the reorg. 
 
 If the reorg happens then we need to check whether it impacts the block we used to modify internal app state to act appropriately on that state. This implies that the internal app state can detect reorgs. In order to pick up reorgs one approach is to cache the optimistic views and if one mismatches with a view we picked up the settlement from then it’s an indicator that the reorg happened.
+
+## Dstack Light clients
+
+The dstack replication approach has started to gain popularity within TEEs because it allows nodes to replicate with the same encrypted state without ever decrypting it in an insecure way. Light clients don't necessarily need to share encrypted state, however having to onboard and verify the quote for each light client before being able to verify the signature is some extra lifting and adds some complexity on the consumer (which could be another TEE as well). 
+
+To tackle this we can use the dstack replication approach so that there's a single public key we need to verify the signature of: the dstack shared key. We now know that any signature for the dstack pubkey is an attested light client, so there's no need to verify multiple quotes, we can just verify the bootstrap quote one time!
+
+The light clients will then all produce data under the same signature. 
+
+### Tplus dstack light clients on TDX
+
+I've [experimented with this](https://github.com/tpluslabs/tplus-examples/tree/main/dstack-helios-tdx) and you can go over to [https://tpluslabs.github.io/tplus-examples/](https://tpluslabs.github.io/tplus-examples/) and follow the instructions.
 
 ---
 

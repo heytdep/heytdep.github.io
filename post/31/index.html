@@ -1,25 +1,26 @@
 <p><code>03/04/2025</code></p>
-<p>Decentralized TEE applications that interface with blockchains need
-to plug in a trusted source of data for said blockchains. One approach
-is to run full nodes within a TEE, but an even better one is to use
-light clients when applicable. At a high level, light clients guarantee
-to the TEE that the data used by the execution layer existed in the
-blockchain at the specified block.</p>
+<p>Decentralized TEE-based applications that interface with blockchains
+need to plug in a trusted source of data for said blockchains. One
+approach is to run full nodes within a TEE, but an even better one is to
+use light clients when applicable. At a high level, light clients
+guarantee to the TEE that the data used by the execution layer existed
+in the blockchain at the specified block.</p>
 <p>Helios proposes an interesting approach where the light client not
 only provides a consensus client but also integrates with external
-execution layers (RPCs) that support handing out inclusion MPT proofs
-(e.g Alchemy or Infura). I explore how Helios works at a lower level to
-understand the actual guarantees that it provides to the executing host
-and later make some observations regarding the affinity of such light
-clients with TEEs and what are some precautions we need to make when
-utilizing light clients within a TEE.</p>
+execution layers (execution RPCs) that support handing out inclusion MPT
+proofs (e.g Alchemy or Infura). In this write-up I briefly explore how
+Helios works at a lower level to understand the actual guarantees that
+it provides and later make some observations regarding the affinity of
+such light clients with TEEs and what are some precautions we need to
+make when utilizing light clients within a TEE.</p>
 <h1 id="mpt-proofs-in-light-clients">MPT Proofs in Light Clients</h1>
 <p>With helios we can plug in any consensus rpc we want and bootstrap
 our node given our weak subjective root of trust (more on this in the
 next section).</p>
 <p>Looking at the code, helios basically allows to execute on verifiable
-state. E.g if we run <code>call</code> what happens is that helios first
-builds state:</p>
+state by either verifying inclusion proof on the returned data or by
+loading said state first for more complex actions. E.g if we run
+<code>call</code> what happens is that helios first builds state:</p>
 <div class="sourceCode" id="cb1"><pre
 class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> <span class="kw">mut</span> db <span class="op">=</span> <span class="pp">ProofDB::</span>new(<span class="kw">self</span><span class="op">.</span>tag<span class="op">,</span> <span class="kw">self</span><span class="op">.</span>execution<span class="op">.</span>clone())<span class="op">;</span></span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>_ <span class="op">=</span> db<span class="op">.</span>state<span class="op">.</span>prefetch_state(tx<span class="op">,</span> validate_tx)<span class="op">.</span><span class="kw">await</span><span class="op">;</span></span>
@@ -348,8 +349,8 @@ specific.</p>
 <p>NB: there might be more!</p>
 </blockquote>
 <h1 id="tee-considerations">TEE considerations</h1>
-<h3 id="on-the-weak-subjective-checkpoint"><strong>On the weak
-subjective checkpoint</strong></h3>
+<h2 id="on-the-weak-subjective-checkpoint"><strong>On the weak
+subjective checkpoint</strong></h2>
 <p>The bootstrapping checkpoint should be signed and published by the
 TEE. This allows anyone to verify that the light client was bootstrapped
 at a certain point in time using a checkpoint from another point in
@@ -359,7 +360,7 @@ to join the P2P network of light clients. Kettles that are replicating
 and not bootstrapping should request the checkpoint from other kettles,
 there should be at least one kettle (the bootstrapping one) ready to
 hand out the checkpoint.</p>
-<h3 id="on-rpcs"><strong>On RPCs</strong></h3>
+<h2 id="on-rpcs"><strong>On RPCs</strong></h2>
 <p>Since the light client can verify RPC data for both consensus and
 execution, the RPCs used should obviously be configurable by the
 operator; potentially also at runtime. We already rely on the operator
@@ -373,7 +374,7 @@ should have some built-in redundancy to provide higher guarantees
 without having to re-sync. The very responsive helios team is already
 working on this! <a
 href="https://github.com/a16z/helios/issues/574">https://github.com/a16z/helios/issues/574</a></p>
-<h3 id="on-timestamps"><strong>On timestamps</strong></h3>
+<h2 id="on-timestamps"><strong>On timestamps</strong></h2>
 <p>Helios requires a handle over the current system timestamp in a
 handful of situations. The first one to get out of the way is the
 bootstrapping. Helios holds logic to force the checkpoint to be
@@ -400,7 +401,7 @@ submit old state as valid the other nodes can prove that the state was
 old. These can be pretty easily solved by disabling
 <code>kvmclock</code> and using the virtual TSC provided by TDX;
 safeguarded by an NTP setup on bootstrap. More on this here.</p>
-<h3 id="on-reorgs"><strong>On reorgs</strong></h3>
+<h2 id="on-reorgs"><strong>On reorgs</strong></h2>
 <p>As explained perviously, handling re-orgs is not something that in
 inherent behavior of the light client itself. The light client relies on
 a beacon node to infer the canonical fork, but as shown in the above
@@ -418,8 +419,8 @@ a later block it doesn’t mean they are malicious so it depends on what
 the application rules require. The application might also choose to
 combine both optimistic and finalize views for operations of different
 validity.</p>
-<h4 id="reducing-reorg-impact-probability">Reducing Reorg Impact
-Probability</h4>
+<h3 id="reducing-reorg-impact-probability">Reducing Reorg Impact
+Probability</h3>
 <p>One approach to reducing the probability of having internal
 application state impacted by the reorg is to require at least
 <em>n</em> optimistic block before we deem block
@@ -429,7 +430,7 @@ application logic at the expense of lagging <em>n</em> slots behind.
 This approach works for tasks that need an optimistic view of the
 network with higher probability of being valid but where such view
 doesn’t perform critical actions.</p>
-<h4 id="caching-optimistic-views">Caching optimistic views</h4>
+<h3 id="caching-optimistic-views">Caching optimistic views</h3>
 <p>This approach if for application state that is more critical but does
 not necessarily have a chained effect, i.e can be updated given an
 optimistic view but in case a reorg happens it’s not a vulnerability to
@@ -440,6 +441,28 @@ state. This implies that the internal app state can detect reorgs. In
 order to pick up reorgs one approach is to cache the optimistic views
 and if one mismatches with a view we picked up the settlement from then
 it’s an indicator that the reorg happened.</p>
+<h2 id="dstack-light-clients">Dstack Light clients</h2>
+<p>The dstack replication approach has started to gain popularity within
+TEEs because it allows nodes to replicate with the same encrypted state
+without ever decrypting it in an insecure way. Light clients don’t
+necessarily need to share encrypted state, however having to onboard and
+verify the quote for each light client before being able to verify the
+signature is some extra lifting and adds some complexity on the consumer
+(which could be another TEE as well).</p>
+<p>To tackle this we can use the dstack replication approach so that
+there’s a single public key we need to verify the signature of: the
+dstack shared key. We now know that any signature for the dstack pubkey
+is an attested light client, so there’s no need to verify multiple
+quotes, we can just verify the bootstrap quote one time!</p>
+<p>The light clients will then all produce data under the same
+signature.</p>
+<h3 id="tplus-dstack-light-clients-on-tdx">Tplus dstack light clients on
+TDX</h3>
+<p>I’ve <a
+href="https://github.com/tpluslabs/tplus-examples/tree/main/dstack-helios-tdx">experimented
+with this</a> and you can go over to <a
+href="https://tpluslabs.github.io/tplus-examples/">https://tpluslabs.github.io/tplus-examples/</a>
+and follow the instructions.</p>
 <hr />
 <p>There’s probably more to be added here this is just the first
 iteration!</p>
