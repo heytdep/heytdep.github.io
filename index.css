@@ -176,9 +176,11 @@ pre {
 }
 
 code {
+    font-size: 16px;  
     background-color: #cdcdcd;
     padding: 2px;
-    border-radius: 5px
+    border-radius: 5px;
+    color: rgb(30, 89, 30)
 }
 
 /*

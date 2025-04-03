@@ -1,0 +1,445 @@
+<p><code>03/04/2025</code></p>
+<p>Decentralized TEE applications that interface with blockchains need
+to plug in a trusted source of data for said blockchains. One approach
+is to run full nodes within a TEE, but an even better one is to use
+light clients when applicable. At a high level, light clients guarantee
+to the TEE that the data used by the execution layer existed in the
+blockchain at the specified block.</p>
+<p>Helios proposes an interesting approach where the light client not
+only provides a consensus client but also integrates with external
+execution layers (RPCs) that support handing out inclusion MPT proofs
+(e.g Alchemy or Infura). I explore how Helios works at a lower level to
+understand the actual guarantees that it provides to the executing host
+and later make some observations regarding the affinity of such light
+clients with TEEs and what are some precautions we need to make when
+utilizing light clients within a TEE.</p>
+<h1 id="mpt-proofs-in-light-clients">MPT Proofs in Light Clients</h1>
+<p>With helios we can plug in any consensus rpc we want and bootstrap
+our node given our weak subjective root of trust (more on this in the
+next section).</p>
+<p>Looking at the code, helios basically allows to execute on verifiable
+state. E.g if we run <code>call</code> what happens is that helios first
+builds state:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> <span class="kw">mut</span> db <span class="op">=</span> <span class="pp">ProofDB::</span>new(<span class="kw">self</span><span class="op">.</span>tag<span class="op">,</span> <span class="kw">self</span><span class="op">.</span>execution<span class="op">.</span>clone())<span class="op">;</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>_ <span class="op">=</span> db<span class="op">.</span>state<span class="op">.</span>prefetch_state(tx<span class="op">,</span> validate_tx)<span class="op">.</span><span class="kw">await</span><span class="op">;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co">// ...</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> prefetch_state(</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">mut</span> <span class="kw">self</span><span class="op">,</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>        tx<span class="op">:</span> <span class="op">&amp;</span><span class="pp">N::</span>TransactionRequest<span class="op">,</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>        validate_tx<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> block_id <span class="op">=</span> <span class="cn">Some</span>(<span class="kw">self</span><span class="op">.</span>block<span class="op">.</span>into())<span class="op">;</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> account_map <span class="op">=</span> <span class="kw">self</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>execution</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>create_extended_access_list(tx<span class="op">,</span> validate_tx<span class="op">,</span> block_id)</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="co">// ...</span></span></code></pre></div>
+<p>where creating the access list is streamlined to a generic, which
+behind a couple of calls is implemented by the execution client API.
+When setting up helios, <strong>if a consensus rpc is provided the
+builder defaults to verifiable execution</strong> which enables the
+<code>verifiable_api</code> where extending the access list works as
+follows:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="kw">fn</span> create_extended_access_list(</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    tx<span class="op">:</span> <span class="op">&amp;</span><span class="pp">N::</span>TransactionRequest<span class="op">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    validate_tx<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    block_id<span class="op">:</span> <span class="dt">Option</span><span class="op">&lt;</span>BlockId<span class="op">&gt;,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>HashMap<span class="op">&lt;</span>Address<span class="op">,</span> Account<span class="op">&gt;&gt;</span> <span class="op">{</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> block_id <span class="op">=</span> block_id<span class="op">.</span>unwrap_or_default()<span class="op">;</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> tag <span class="op">=</span> <span class="pp">BlockTag::</span>try_from(block_id)<span class="op">?;</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> block <span class="op">=</span> <span class="kw">self</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>state</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>get_block(tag)</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span><span class="kw">await</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>ok_or(<span class="pp">ExecutionError::</span>BlockNotFound(tag))<span class="op">?;</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> block_id <span class="op">=</span> <span class="pp">BlockId::</span>Number(block<span class="op">.</span>header()<span class="op">.</span>number()<span class="op">.</span>into())<span class="op">;</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> ExtendedAccessListResponse <span class="op">{</span> accounts <span class="op">}</span> <span class="op">=</span> <span class="kw">self</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>api</span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>create_extended_access_list(tx<span class="op">.</span>clone()<span class="op">,</span> validate_tx<span class="op">,</span> <span class="cn">Some</span>(block_id))</span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> (address<span class="op">,</span> account) <span class="kw">in</span> <span class="op">&amp;</span>accounts <span class="op">{</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>        <span class="kw">self</span><span class="op">.</span>verify_account(<span class="op">*</span>address<span class="op">,</span> account<span class="op">,</span> <span class="op">&amp;</span>block)<span class="op">?;</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(accounts)</span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> verify_account(</span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>    address<span class="op">:</span> Address<span class="op">,</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>    account<span class="op">:</span> <span class="op">&amp;</span>AccountResponse<span class="op">,</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>    block<span class="op">:</span> <span class="op">&amp;</span><span class="pp">N::</span>BlockResponse<span class="op">,</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> proof <span class="op">=</span> EIP1186AccountProofResponse <span class="op">{</span></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a>        address<span class="op">,</span></span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a>        balance<span class="op">:</span> account<span class="op">.</span>account<span class="op">.</span>balance<span class="op">,</span></span>
+<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a>        code_hash<span class="op">:</span> account<span class="op">.</span>account<span class="op">.</span>code_hash<span class="op">,</span></span>
+<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a>        nonce<span class="op">:</span> account<span class="op">.</span>account<span class="op">.</span>nonce<span class="op">,</span></span>
+<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a>        storage_hash<span class="op">:</span> account<span class="op">.</span>account<span class="op">.</span>storage_root<span class="op">,</span></span>
+<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a>        account_proof<span class="op">:</span> account<span class="op">.</span>account_proof<span class="op">.</span>clone()<span class="op">,</span></span>
+<span id="cb2-41"><a href="#cb2-41" aria-hidden="true" tabindex="-1"></a>        storage_proof<span class="op">:</span> account<span class="op">.</span>storage_proof<span class="op">.</span>clone()<span class="op">,</span></span>
+<span id="cb2-42"><a href="#cb2-42" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb2-43"><a href="#cb2-43" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Verify the account proof</span></span>
+<span id="cb2-44"><a href="#cb2-44" aria-hidden="true" tabindex="-1"></a>    verify_account_proof(<span class="op">&amp;</span>proof<span class="op">,</span> block<span class="op">.</span>header()<span class="op">.</span>state_root())<span class="op">?;</span></span>
+<span id="cb2-45"><a href="#cb2-45" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Verify the storage proofs</span></span>
+<span id="cb2-46"><a href="#cb2-46" aria-hidden="true" tabindex="-1"></a>    verify_storage_proof(<span class="op">&amp;</span>proof)<span class="op">?;</span></span>
+<span id="cb2-47"><a href="#cb2-47" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Verify the code hash (if code is included in the response)</span></span>
+<span id="cb2-48"><a href="#cb2-48" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(code) <span class="op">=</span> <span class="op">&amp;</span>account<span class="op">.</span>code <span class="op">{</span></span>
+<span id="cb2-49"><a href="#cb2-49" aria-hidden="true" tabindex="-1"></a>        verify_code_hash_proof(<span class="op">&amp;</span>proof<span class="op">,</span> code)<span class="op">?;</span></span>
+<span id="cb2-50"><a href="#cb2-50" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-51"><a href="#cb2-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-52"><a href="#cb2-52" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(())</span>
+<span id="cb2-53"><a href="#cb2-53" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The important part here is <code>verify_some_proof</code> which
+ultimately resolves to <code>verify_mpt_proof</code> which
+<code>/// Verifies a MPT proof for a given key-value pair against the provided root hash</code>.
+This means that the execution layer returns a merkle patricia trie
+inclusion proof where which gets matched against the current block
+header (assuming the client is synced!)</p>
+<p>This all sounds good, but how do we obtain our root?</p>
+<h1 id="consensus-client">Consensus Client</h1>
+<p>Again, Helios is cool because it wraps both execution and consensus.
+Execution uses state obtained through RPC inclusion proofs and consensus
+does the most important part, syncing the root state. To understand what
+are the guarantees around helios light clients, the question is about
+how this actually happens.</p>
+<p>When bootstrapping our light client, we request a “bootstrap” from
+the RPC consensus we specified when building:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> bootstrap <span class="op">=</span> <span class="kw">self</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span>rpc</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span>get_bootstrap(checkpoint)</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span><span class="kw">await</span></span></code></pre></div>
+<p>The <code>checkpoint</code> is the famous <a
+href="https://ethereum.org/en/developers/docs/consensus-mechanisms/pos/weak-subjectivity/#ws-checkpoints"><strong>weak
+subjectivity checkpoint</strong></a>. This is the root of trust we are
+going to use to sync our node. It’s a block hash that was included in
+the chain. As you might guess, the validity of such root of trust
+derives the security of the light client; a checkpoint that was not
+actually included can lead a light client that relies on a malicious
+consensus RPC to believe a certain state is correct when it indeed
+isn’t.</p>
+<p>We request the bootstrap for a given block root (the checkpoint) and
+what we get back is effectively all the information we need to
+bootstrap:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> Bootstrap<span class="op">&lt;</span>S<span class="op">:</span> ConsensusSpec<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> header<span class="op">:</span> LightClientHeader<span class="op">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> current_sync_committee<span class="op">:</span> SyncCommittee<span class="op">&lt;</span>S<span class="op">&gt;,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> current_sync_committee_branch<span class="op">:</span> FixedVector<span class="op">&lt;</span>B256<span class="op">,</span> <span class="pp">typenum::</span>U5<span class="op">&gt;,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> current_sync_committee_branch<span class="op">:</span> FixedVector<span class="op">&lt;</span>B256<span class="op">,</span> <span class="pp">typenum::</span>U6<span class="op">&gt;,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>We cannot take bootstrap for granted tho as it’s the result of an RPC
+call at the end of the day and we cannot blindly trust the response. As
+such we verify the committee that was provided against the bootstrap
+header (NB: we’re not directly verifying against our checkpoint here,
+just verifying that the committee is indeed a leaf of the beacon
+header), and then we make sure that the header on which we verified is
+indeed our checkpoint:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> committee_valid <span class="op">=</span> is_current_committee_proof_valid(<span class="op">...</span>)<span class="op">;</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> header_hash <span class="op">=</span> bootstrap<span class="op">.</span>header()<span class="op">.</span>beacon()<span class="op">.</span>tree_hash_root()<span class="op">;</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> header_valid <span class="op">=</span> header_hash <span class="op">==</span> checkpoint<span class="op">;</span></span></code></pre></div>
+<p>Once the bootstrap is verified it is appended to the light client’s
+in memory store and the syncing process can begin: based on the sync
+diff we request updates to the consensus client and finally verify and
+apply all of the updates:</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> updates<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Update<span class="op">&lt;</span>S<span class="op">&gt;&gt;</span> <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>get_updates()<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> update <span class="kw">in</span> updates <span class="op">{</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>verify_update(<span class="op">&amp;</span>update)<span class="op">?;</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>apply_update(<span class="op">&amp;</span>update)<span class="op">;</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h2 id="consensus-execution-communication">Consensus &lt;&gt; Execution
+Communication</h2>
+<p>To fully understand the implementation and evaluate considerations
+for using helios in a TEE, we need to check how the updates are applied
+and how it impacts the execution layer.</p>
+<p>If you look at the code, helios maintains the two clients separately.
+As the consensus syncs, it produces blocks that are appended to
+consensus state. However, when execution tries to get a hold of the root
+hash to verify MPT proofs, it doesn’t request them directly to the
+consensus client, it rather looks at the local execution client state
+and depending on the provided block tag it gets the block.</p>
+<p>This implies that there is some level of communication between the
+consensus and execution clients. In fact, when helios instantiates the
+execution client it provides it with a receiver for an mpsc channel:</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span><span class="op">&lt;</span>N<span class="op">:</span> NetworkSpec<span class="op">,</span> C<span class="op">:</span> Consensus<span class="op">&lt;</span><span class="pp">N::</span>BlockResponse<span class="op">&gt;&gt;</span> Node<span class="op">&lt;</span>N<span class="op">,</span> C<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="kw">pub</span> <span class="kw">fn</span> new(</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>      execution_mode<span class="op">:</span> ExecutionMode<span class="op">,</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>      <span class="kw">mut</span> consensus<span class="op">:</span> C<span class="op">,</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>      fork_schedule<span class="op">:</span> ForkSchedule<span class="op">,</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Self</span><span class="op">,</span> ClientError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>      <span class="kw">let</span> block_recv <span class="op">=</span> consensus<span class="op">.</span>block_recv()<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>      <span class="kw">let</span> finalized_block_recv <span class="op">=</span> consensus<span class="op">.</span>finalized_block_recv()<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>            <span class="co">// ...</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>      start_state_updater(state<span class="op">,</span> execution<span class="op">.</span>clone()<span class="op">,</span> block_recv<span class="op">,</span> finalized_block_recv)<span class="op">;</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>      <span class="cn">Ok</span>(Node <span class="op">{</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>          consensus<span class="op">,</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>          execution<span class="op">,</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>          fork_schedule<span class="op">,</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>      <span class="op">}</span>)</span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> start_state_updater<span class="op">&lt;</span>N<span class="op">:</span> NetworkSpec<span class="op">&gt;</span>(</span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>  state<span class="op">:</span> State<span class="op">&lt;</span>N<span class="op">&gt;,</span></span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>  client<span class="op">:</span> Arc<span class="op">&lt;</span><span class="kw">dyn</span> ExecutionSpec<span class="op">&lt;</span>N<span class="op">&gt;&gt;,</span></span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>  <span class="kw">mut</span> block_recv<span class="op">:</span> Receiver<span class="op">&lt;</span><span class="pp">N::</span>BlockResponse<span class="op">&gt;,</span></span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>  <span class="kw">mut</span> finalized_block_recv<span class="op">:</span> <span class="pp">watch::</span>Receiver<span class="op">&lt;</span><span class="dt">Option</span><span class="op">&lt;</span><span class="pp">N::</span>BlockResponse<span class="op">&gt;&gt;,</span></span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>) <span class="op">{</span></span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a>  run(<span class="kw">async</span> <span class="kw">move</span> <span class="op">{</span></span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a>      <span class="cf">loop</span> <span class="op">{</span></span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>          <span class="pp">select!</span> <span class="op">{</span></span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>              block <span class="op">=</span> block_recv<span class="op">.</span>recv() <span class="op">=&gt;</span> <span class="op">{</span></span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>                  <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(block) <span class="op">=</span> block <span class="op">{</span></span>
+<span id="cb7-32"><a href="#cb7-32" aria-hidden="true" tabindex="-1"></a>                      state<span class="op">.</span>inner<span class="op">.</span>write()<span class="op">.</span><span class="kw">await</span><span class="op">.</span>push_block(block<span class="op">,</span> client<span class="op">.</span>clone())<span class="op">.</span><span class="kw">await</span><span class="op">;</span></span>
+<span id="cb7-33"><a href="#cb7-33" aria-hidden="true" tabindex="-1"></a>                  <span class="op">}</span></span>
+<span id="cb7-34"><a href="#cb7-34" aria-hidden="true" tabindex="-1"></a>              <span class="op">},</span></span>
+<span id="cb7-35"><a href="#cb7-35" aria-hidden="true" tabindex="-1"></a>              _ <span class="op">=</span> finalized_block_recv<span class="op">.</span>changed() <span class="op">=&gt;</span> <span class="op">{</span></span>
+<span id="cb7-36"><a href="#cb7-36" aria-hidden="true" tabindex="-1"></a>                  <span class="kw">let</span> block <span class="op">=</span> finalized_block_recv<span class="op">.</span>borrow_and_update()<span class="op">.</span>clone()<span class="op">;</span></span>
+<span id="cb7-37"><a href="#cb7-37" aria-hidden="true" tabindex="-1"></a>                  <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(block) <span class="op">=</span> block <span class="op">{</span></span>
+<span id="cb7-38"><a href="#cb7-38" aria-hidden="true" tabindex="-1"></a>                      state<span class="op">.</span>inner<span class="op">.</span>write()<span class="op">.</span><span class="kw">await</span><span class="op">.</span>push_finalized_block(block)<span class="op">;</span></span>
+<span id="cb7-39"><a href="#cb7-39" aria-hidden="true" tabindex="-1"></a>                  <span class="op">}</span></span>
+<span id="cb7-40"><a href="#cb7-40" aria-hidden="true" tabindex="-1"></a>              <span class="op">},</span></span>
+<span id="cb7-41"><a href="#cb7-41" aria-hidden="true" tabindex="-1"></a>          <span class="op">}</span></span>
+<span id="cb7-42"><a href="#cb7-42" aria-hidden="true" tabindex="-1"></a>      <span class="op">}</span></span>
+<span id="cb7-43"><a href="#cb7-43" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb7-44"><a href="#cb7-44" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>As we might expect, the consensus client on the other hand sends out
+the verified blocks while synchronizing:</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span><span class="op">&lt;</span>S<span class="op">:</span> ConsensusSpec<span class="op">,</span> R<span class="op">:</span> ConsensusRpc<span class="op">&lt;</span>S<span class="op">&gt;,</span> DB<span class="op">:</span> Database<span class="op">&gt;</span> ConsensusClient<span class="op">&lt;</span>S<span class="op">,</span> R<span class="op">,</span> DB<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> new(rpc<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> config<span class="op">:</span> Arc<span class="op">&lt;</span>Config<span class="op">&gt;</span>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>ConsensusClient<span class="op">&lt;</span>S<span class="op">,</span> R<span class="op">,</span> DB<span class="op">&gt;&gt;</span> <span class="op">{</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> (block_send<span class="op">,</span> block_recv) <span class="op">=</span> channel(<span class="dv">256</span>)<span class="op">;</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> (finalized_block_send<span class="op">,</span> finalized_block_recv) <span class="op">=</span> <span class="pp">watch::</span>channel(<span class="cn">None</span>)<span class="op">;</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>                run(<span class="kw">async</span> <span class="kw">move</span> <span class="op">{</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> <span class="kw">mut</span> inner <span class="op">=</span> <span class="pp">Inner::</span><span class="op">&lt;</span>S<span class="op">,</span> R<span class="op">&gt;</span><span class="pp">::</span>new(</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>                <span class="op">&amp;</span>rpc<span class="op">,</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>                block_send<span class="op">,</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>                finalized_block_send<span class="op">,</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>                                <span class="co">// ..</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>            )<span class="op">;</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>                        <span class="co">// ... sync client to the current checkpoint</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>            _ <span class="op">=</span> inner<span class="op">.</span>send_blocks()<span class="op">.</span><span class="kw">await</span><span class="op">;</span></span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>            <span class="cf">loop</span> <span class="op">{</span></span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>              <span class="co">// advance and send out blocks to the execution layer receiver!</span></span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>              <span class="kw">let</span> res <span class="op">=</span> inner<span class="op">.</span>advance()<span class="op">.</span><span class="kw">await</span><span class="op">;</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>              <span class="kw">let</span> res <span class="op">=</span> inner<span class="op">.</span>send_blocks()<span class="op">.</span><span class="kw">await</span><span class="op">;</span></span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>              <span class="co">// ..</span></span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Ok</span>(ConsensusClient <span class="op">{</span></span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>            block_recv<span class="op">:</span> <span class="cn">Some</span>(block_recv)<span class="op">,</span></span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>            finalized_block_recv<span class="op">:</span> <span class="cn">Some</span>(finalized_block_recv)<span class="op">,</span></span>
+<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>                        <span class="co">// ..</span></span>
+<span id="cb8-27"><a href="#cb8-27" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span>)</span>
+<span id="cb8-28"><a href="#cb8-28" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb8-29"><a href="#cb8-29" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Cool, so now we know exactly what gets verified and what gets send to
+the execution layer. Before making TEE specific considerations however,
+we need to check out how light clients deal with re-orgs.</p>
+<h1 id="dealing-with-reorgs-on-ethereum-l1">Dealing with Reorgs on
+Ethereum L1</h1>
+<p>Reorgs occur when there are two blocks being proposed for the same
+head. In PoS specifically, this should not happen much because
+validators are not racing each other to the block rather there is an
+elected validator creating the block; a validator could still produce
+two blocks for the same head but it would get their stake slashed.
+Reorgs however seem to occur mainly due to delays in the networking
+level that cause a block to not be received in time by most of the
+network and not have enough attestations to back up the block.</p>
+<p>For example, say that we have block 10 that was selected as head of
+the chain, then it’s validator v_1’s turn to create the block 11 but the
+next elected validator v_2 has received block 11 late (e.g after 18s vs
+within 12s) so it built block 12 off block 10. Assuming that block 12
+gets received by the majority view of the network in time, it will then
+have more attestation and will be selected as new head (from 10 →
+12).</p>
+<p>In fact, due to network latency/delayed block propagation, a (non
+necessarily small) subset of the validators might not see the latest
+block in time and are led to attest for an older block. Later, when the
+delayed block is received, so we effectively have two competing blocks,
+the fork choice rule will switch to the branch with higher attestation
+weight.</p>
+<h3 id="light-clients-and-reorgs">Light clients and reorgs</h3>
+<p>Light clients rely on the beacon API to process updates to their
+local view; more specifically after synchronizing with committee data
+they sync on finalized state. The latter happens when advancing the
+local view as well:</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> sync(<span class="op">&amp;</span><span class="kw">mut</span> <span class="kw">self</span><span class="op">,</span> checkpoint<span class="op">:</span> B256) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">// sync committee data ..</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> finality_update <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>rpc<span class="op">.</span>get_finality_update()<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>verify_finality_update(<span class="op">&amp;</span>finality_update)<span class="op">?;</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>apply_finality_update(<span class="op">&amp;</span>finality_update)<span class="op">;</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ..</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">async</span> <span class="kw">fn</span> advance(<span class="op">&amp;</span><span class="kw">mut</span> <span class="kw">self</span>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> finality_update <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>rpc<span class="op">.</span>get_finality_update()<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>verify_finality_update(<span class="op">&amp;</span>finality_update)<span class="op">?;</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>apply_finality_update(<span class="op">&amp;</span>finality_update)<span class="op">;</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ..</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Behind some calls, applying the finality update on the light client’s
+local view looks like this</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> apply_generic_update<span class="op">&lt;</span>S<span class="op">:</span> ConsensusSpec<span class="op">&gt;</span>(</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    store<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> LightClientStore<span class="op">&lt;</span>S<span class="op">&gt;,</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    update<span class="op">:</span> <span class="op">&amp;</span>GenericUpdate<span class="op">&lt;</span>S<span class="op">&gt;,</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Option</span><span class="op">&lt;</span>B256<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>        <span class="co">// ..</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> should_update_optimistic <span class="op">{</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>        store<span class="op">.</span>optimistic_header <span class="op">=</span> update<span class="op">.</span>attested_header<span class="op">.</span>clone()<span class="op">;</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ..</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> should_apply_update <span class="op">{</span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> checkpoint <span class="op">=</span> apply_update_no_quorum_check(store<span class="op">,</span> update)<span class="op">;</span></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>        <span class="co">// ..</span></span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> apply_update_no_quorum_check<span class="op">&lt;</span>S<span class="op">:</span> ConsensusSpec<span class="op">&gt;</span>(</span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>    store<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> LightClientStore<span class="op">&lt;</span>S<span class="op">&gt;,</span></span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>    update<span class="op">:</span> <span class="op">&amp;</span>GenericUpdate<span class="op">&lt;</span>S<span class="op">&gt;,</span></span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Option</span><span class="op">&lt;</span>B256<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a>        <span class="co">// ..</span></span>
+<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> update_finalized_slot <span class="op">&gt;</span> store<span class="op">.</span>finalized_header<span class="op">.</span>beacon()<span class="op">.</span>slot <span class="op">{</span></span>
+<span id="cb10-23"><a href="#cb10-23" aria-hidden="true" tabindex="-1"></a>        store<span class="op">.</span>finalized_header <span class="op">=</span> update<span class="op">.</span>finalized_header<span class="op">.</span>clone()<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb10-24"><a href="#cb10-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-25"><a href="#cb10-25" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> store<span class="op">.</span>finalized_header<span class="op">.</span>beacon()<span class="op">.</span>slot <span class="op">&gt;</span> store<span class="op">.</span>optimistic_header<span class="op">.</span>beacon()<span class="op">.</span>slot <span class="op">{</span></span>
+<span id="cb10-26"><a href="#cb10-26" aria-hidden="true" tabindex="-1"></a>            store<span class="op">.</span>optimistic_header <span class="op">=</span> store<span class="op">.</span>finalized_header<span class="op">.</span>clone()<span class="op">;</span></span>
+<span id="cb10-27"><a href="#cb10-27" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb10-28"><a href="#cb10-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-29"><a href="#cb10-29" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> store<span class="op">.</span>finalized_header<span class="op">.</span>beacon()<span class="op">.</span>slot <span class="op">%</span> <span class="pp">S::</span>slots_per_epoch() <span class="op">==</span> <span class="dv">0</span> <span class="op">{</span></span>
+<span id="cb10-30"><a href="#cb10-30" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> checkpoint <span class="op">=</span> store<span class="op">.</span>finalized_header<span class="op">.</span>beacon()<span class="op">.</span>tree_hash_root()<span class="op">;</span></span>
+<span id="cb10-31"><a href="#cb10-31" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="cn">Some</span>(checkpoint)<span class="op">;</span></span>
+<span id="cb10-32"><a href="#cb10-32" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb10-33"><a href="#cb10-33" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb10-34"><a href="#cb10-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-35"><a href="#cb10-35" aria-hidden="true" tabindex="-1"></a>    <span class="cn">None</span></span>
+<span id="cb10-36"><a href="#cb10-36" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>As the code hints, the light client’s call to
+<code>/eth/v1/beacon/light_client/finality_update</code> on the
+consensus RPC returns both data to update the optimistic and finalized
+headers. Optimistic headers can be reorg’d while finalized can give more
+assurances.</p>
+<p>That said, for a view to be finalized we must wait for the current
+epoch to complete and the subsequent epoch to complete as well; this
+means that the light client is operating on a version of the chain that
+is between 6-12 minutes behind the “real-time” view of the chain.</p>
+<hr />
+<p>We’re now ready to make some considerations that are TEE
+specific.</p>
+<blockquote>
+<p>NB: there might be more!</p>
+</blockquote>
+<h1 id="tee-considerations">TEE considerations</h1>
+<h3 id="on-the-weak-subjective-checkpoint"><strong>On the weak
+subjective checkpoint</strong></h3>
+<p>The bootstrapping checkpoint should be signed and published by the
+TEE. This allows anyone to verify that the light client was bootstrapped
+at a certain point in time using a checkpoint from another point in
+time. Depending on whether the checkpoint is valid and not vulnerable to
+not necessarily theoretical mathematical attacks other nodes can decide
+to join the P2P network of light clients. Kettles that are replicating
+and not bootstrapping should request the checkpoint from other kettles,
+there should be at least one kettle (the bootstrapping one) ready to
+hand out the checkpoint.</p>
+<h3 id="on-rpcs"><strong>On RPCs</strong></h3>
+<p>Since the light client can verify RPC data for both consensus and
+execution, the RPCs used should obviously be configurable by the
+operator; potentially also at runtime. We already rely on the operator
+for availability of said light client, so we also trust the operator to
+use RPCs that are available; runtime switching can come really in handy
+if the RPC providers turn out to be unavailable or not reliant. This
+implies that the host has some level of authentication within the TD
+that enables them to swap rpc providers mid-execution with a handle to
+switch providers. This doesn’t decrease security. Additionally, helios
+should have some built-in redundancy to provide higher guarantees
+without having to re-sync. The very responsive helios team is already
+working on this! <a
+href="https://github.com/a16z/helios/issues/574">https://github.com/a16z/helios/issues/574</a></p>
+<h3 id="on-timestamps"><strong>On timestamps</strong></h3>
+<p>Helios requires a handle over the current system timestamp in a
+handful of situations. The first one to get out of the way is the
+bootstrapping. Helios holds logic to force the checkpoint to be
+resistant to worst-case scenario theoretical attacks. This logic would
+be enforced within the measurement. However, this logic relies on the
+timestamp. Timestamps are generally untrusted territory within TEEs like
+TDX. Assuming we’re using <code>kvmclock</code> a malicious host could
+bootstrap with an old checkpoint opening up doors for practical attacks
+to infer malicious chain state in the light client and producing
+potentially malicious downstream data. Since on 1 we said we want to
+rely on social layer to choose which network to join, this is not an
+issue. A visibly old checkpoint will be considered as an attempt to
+bootstrap to a potentially invalid state and such node will not be
+joined; but some designs may not rely on this logic and could require
+e.g the bootstrapping to be done on a hardcoded rpc which was known to
+work correctly at bootstrap time taking that as a root of trust as well.
+Other attack vectors, e.g in <code>get_updates</code> are mainly harming
+availability by e.g keeping the node at an older state by fiddling with
+the <code>expected_current_slot</code> . This could be potentially
+harming in an application as well, but can be solved by introducing
+redundancy in the light clients and allowing any light client to check
+the messages produced by each other, and if a malicious host tries to
+submit old state as valid the other nodes can prove that the state was
+old. These can be pretty easily solved by disabling
+<code>kvmclock</code> and using the virtual TSC provided by TDX;
+safeguarded by an NTP setup on bootstrap. More on this here.</p>
+<h3 id="on-reorgs"><strong>On reorgs</strong></h3>
+<p>As explained perviously, handling re-orgs is not something that in
+inherent behavior of the light client itself. The light client relies on
+a beacon node to infer the canonical fork, but as shown in the above
+section, the beacon node shares both a finalized view and an optimistic
+one. The light client might choose to rely on the optimistic view, but
+in case of a reorg of said optimistic view, the light client will update
+its view to follow the one inferred by the new finalized view derived
+from the beacon node. This means that the light client’s internal view
+was wrong at a certain point in time. Reorgs are handled automatically
+by deriving view from the beacon node, but if basing the application’s
+view on one that can be rolled back is not an option for the application
+then having the verification happen on a finalized view can be safer.
+Note that transactions in reorg’d block are rolled back and included in
+a later block it doesn’t mean they are malicious so it depends on what
+the application rules require. The application might also choose to
+combine both optimistic and finalize views for operations of different
+validity.</p>
+<h4 id="reducing-reorg-impact-probability">Reducing Reorg Impact
+Probability</h4>
+<p>One approach to reducing the probability of having internal
+application state impacted by the reorg is to require at least
+<em>n</em> optimistic block before we deem block
+<code>CURRENT - n</code> valid. If <code>n &gt; 1</code> then we already
+greatly reduce the probability of a reorg impacting our internal
+application logic at the expense of lagging <em>n</em> slots behind.
+This approach works for tasks that need an optimistic view of the
+network with higher probability of being valid but where such view
+doesn’t perform critical actions.</p>
+<h4 id="caching-optimistic-views">Caching optimistic views</h4>
+<p>This approach if for application state that is more critical but does
+not necessarily have a chained effect, i.e can be updated given an
+optimistic view but in case a reorg happens it’s not a vulnerability to
+re-update such state to account for the reorg.</p>
+<p>If the reorg happens then we need to check whether it impacts the
+block we used to modify internal app state to act appropriately on that
+state. This implies that the internal app state can detect reorgs. In
+order to pick up reorgs one approach is to cache the optimistic views
+and if one mismatches with a view we picked up the settlement from then
+it’s an indicator that the reorg happened.</p>
+<hr />
+<p>There’s probably more to be added here this is just the first
+iteration!</p>
