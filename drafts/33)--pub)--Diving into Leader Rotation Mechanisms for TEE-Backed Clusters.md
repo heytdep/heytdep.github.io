@@ -1,7 +1,5 @@
 `06/06/2025`
 
-![](/images/wannarotate.png)
-
 One common approach for applications that are based on TEEs is to gain performance by committing state through a single peer (leader peer), but relying on a fallback path in case the leader is unavailable and on leader rotation to mainly increase system security against physical attacks, but also to distribute the role across distinct points in the network topology.
 
 > **TL;DR** Running peers inside an Intel TDX guest means we *already* get strong integrity and confidentiality guarantees.
@@ -14,7 +12,7 @@ One common approach for applications that are based on TEEs is to gain performan
 
 There's already extensive research for leader rotation mechanisms that we can borrow from existing decentralized systems, here I'm just describing some of the highlights with distinct charateristics.
 
-## Leader-Based Protocols
+## Leader-Based Deterministic Protocols
 
 Single leader protocols are inherently more adjacent to the purpose of TEEs: one leader peer proposes state commit and the peers verify the validity of the commit. When leader is unavailable or acts maliciously the peers can trigger a view change in the leader. 
 
@@ -46,8 +44,6 @@ However, this often sacrifices 1 roundtrip and O(n) might not be worth it when n
 
 HotStuff is interesting in that similarly to SBFT it uses aggregated signatures for the critical path **also** for view changes, basically each peer uses their already aggregated threshold sigs as view certificate. So peer sends to leader fixed signature, leader combines the partial signatures into an aggregate threshold one and then forwards it back to the peers (O(1) <-> O(1)). tldr; linear comms but extra roundtrip.
 
----
-
 ## Randomness in Leader Rotation
 
 Above we explore deterministic leader election mechanisms. However, in a TEE setting, the newly elected leader should be selected randomly because one of the primary concerns is physical compromise. 
@@ -71,13 +67,9 @@ However, the idea is that thanks to the confidentiality guarantees TEEs offer th
 
 This is not really applicable to most TEE applications (interesting area to dive into tho) but ideally this is where I see many decentralized products pivot towards, i.e no single proposer rather a multi proposer mechanism where the canonical state depends on protocol-specific rules and tie breaks. Again, this approach has some drawbacks in a TEE based system, mainly it brings in overhead while it doesn't take advantage of the TEEs guarantees around integrity.
 
----
-
 ## Closing Thoughts
 
 When talking about leader rotation mechanisms for TEEs, the best approach is probably to mix stable and rotation based approaches relying on the concept of epochs: stable leader with ability to trigger-change during epoch and for each epoch introduce randomness in electing a new leader. Some protocols might choose to rely on deterministic rotation as well depending on the requirements. One caveat of relying on TEE's integrity guarantees, is that for randomized leader election we won't need the extra roundtrips that other schemes generally introduce.
-
----
 
 # Sketch: Simple Random Leader Rotation and Fallback
 
