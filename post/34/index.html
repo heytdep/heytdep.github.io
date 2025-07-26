@@ -1,0 +1,59 @@
+<h1 id="how-do-leader-based-consensus-mechanisms-look-like-on-tees">How
+Do Leader-Based Consensus Mechanisms Look Like on TEEs?</h1>
+<p>One of the main concerns about TEEs is that hardware gives inherently
+less guarantees around both integrity and confidentiality than
+math-based systems such as SNARKs. Proof systems are however not
+necessarily always the best approach for off-chain computations,
+specifically they’re limited in proving performance.</p>
+<p>We assume a setup where there’s a single leader that can commit state
+for a given time relative to the application (e.g epoch or slot) and
+there’s backup peers that need to validate the committed state.</p>
+<p>The goal of the system is to make communication linear (O(n))</p>
+<p>BFT systems like SBFT decouple commit from execution enabling to
+parallelize and guarantee building N+1 even if N wasn’t executed
+yet.</p>
+<p>Commit needs <span class="math inline">3<em>f</em> + 1</span> while
+execution needs <span class="math inline"><em>f</em> + 1</span> to
+guarantee acknoweldgement around the execution (i.e at least one honest
+node acknowledges the new state).</p>
+<p>In a TEE based system the guarantee for liveness is slightly
+different. The system is safe for a certain number of hacked chips <span
+class="math inline"><em>h</em></span> and can be made unavailable for a
+given number of faulty (i.e malicious) operators <span
+class="math inline"><em>f</em></span>.</p>
+<p>The interesting part about applying BFT systems to TEE-based
+applications is that the pre-commit guarantees that hardware gives
+around the execution integrity is much greater than the one a single
+leader can offer in a standard leader-based BFT system.</p>
+<p>For instance, SBFTs algorithm works roughtly as follows:</p>
+<ol type="1">
+<li>Client sends request to leader.</li>
+<li>Leader builds block and sends it to its backup peers.</li>
+<li>Peers use their (commit) threshold sig to sign over the proposed
+block and share the signature with the commit collector.</li>
+<li>Commit collector combines the signature shares and sends the commit
+proof to all peers.</li>
+<li>Having received the commit proof the peers can now execute the block
+proposed and sign over the new state with their (execution) thershold
+signature and send the certificate to the execution collector.</li>
+<li>Execution collector combines the signatures into an execution proof.
+Note that here the threshold is <span
+class="math inline"><em>f</em> + 1</span> because we just need a honest
+operator (i.e not <span class="math inline"><em>f</em></span>) to
+acknoweldge the new state. The execution collector can now share the new
+state certificate with peers and clients.</li>
+</ol>
+<p>Here the client gets a response for their request in the last step
+but at step 4 client requests are already committed and are generally
+expected to be shortly collected by execution collectors unless network
+conditions changed.</p>
+<p>This means that until our requests get some level of confirmation we
+still need to await <span class="math inline">3<em>f</em> + 1</span>
+peers to share their share of the signature. Network slots thus need to
+match a consensus round and before that there’s no guarantees regarding
+the request the client sends.</p>
+<p>In a TEE system however, we don’t need the slots to match a consensus
+round, specifically we don’t need the requests to be combined into a
+block for them to have some level of integrity guarantees. With this in
+mind, we can move towards a design where slots are much less frequent
+and are simply to offer an even safer level of confirmation.</p>
