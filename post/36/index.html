@@ -83,7 +83,7 @@ the KMS on that is too risk when you think that only that specific
 <p>That’s why we talk about distributed recovery protocols like Paxos or
 Raft. In certain scenarios however, we can explore different solutions
 that are simpler and yield promising results.</p>
-<h3 id="possible-no-kms-solution.">Possible no-kms solution.</h3>
+<h3 id="possible-no-kms-solution.">Possible no-kms Solution.</h3>
 <p>Think of the following (pretty common) generic TEE-based application
 setup:</p>
 <p>Let <span class="math inline"><em>Π</em></span> be our protocol:</p>
@@ -171,6 +171,11 @@ shards with a threshold of 7.</li>
 t2 by just compromising 2 “old shards”. If this was handled by
 governance, adversary would only be able to attack t1 &lt; t &lt; t2 in
 between that timeframe with the same ease.</p>
+<blockquote>
+<p>It’s worth noting that this approach can easily be complementary to
+using the KMS itself. Duplicate data dumps for double the liveness
+guarantees :)</p>
+</blockquote>
 <h1 id="conclusion">Conclusion</h1>
 <p>There’s no perfect solution, but for some <span
 class="math inline"><em>Π</em></span>s the KMS might or might not be the

@@ -44,7 +44,7 @@ The point I'm getting to is that many of such TEE-based apps will want to have a
 
 That's why we talk about distributed recovery protocols like Paxos or Raft. In certain scenarios however, we can explore different solutions that are simpler and yield promising results.
 
-### Possible no-kms solution.
+### Possible no-kms Solution.
 
 Think of the following (pretty common) generic TEE-based application setup: 
 
@@ -85,6 +85,8 @@ The only thing that changes here is that implementing secret sharing so that it 
 - t2: $\Pi$ improves its council's safety so from now on the state dumps are encrypted to 10 shards with a threshold of 7.
 
 In the above scenario the adversary can attach state between t1 and t2 by just compromising 2 "old shards". If this was handled by governance, adversary would only be able to attack t1 < t < t2 in between that timeframe with the same ease.
+
+> It's worth noting that this approach can easily be complementary to using the KMS itself. Duplicate data dumps for double the liveness guarantees :)
 
 # Conclusion
 
