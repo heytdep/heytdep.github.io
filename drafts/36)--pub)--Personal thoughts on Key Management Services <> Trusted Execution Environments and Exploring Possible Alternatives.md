@@ -57,19 +57,19 @@ Let $\Pi$ be our protocol:
 We generally have two ways of controlling our ethereum smart contract:
 
 1. Keep the signing key within the trusted domains and gossip (e.g DH key exchange) it across attested peers.
-2. Have trusted domains attest on-chain to our contract (+potential additional requirements, but that takes us out of the generic context I'm setting up), once attested the specific trusted domain's signing key becomes (one of) the signer in the contract.
+2. Have trusted domains attest on-chain to our contract (+potential additional requirements, but that takes us out of the generic context I'm setting up), once attested the specific trusted domain's signing key becomes (one of) the authorized signers in the contract.
 
 For 2 to work however, we should be guaranteed that the trusted domain that is now operating as a privileged signer on the contract is running the latest version of state. This is crucial in many cases to preserve integrity of the app's users state (e.g think of user balances). This is within the assumptions that we're making for $\Pi$.
 
 If we go with 1, we can rely on the KMS to keep the signing key. This grants good liveness guarantees but due to the above-mentioned reasons it's not enough.
 
-We can still tackle 2 through the KMS: peers within $\Pi$ dump state that's encrypted with the KMS' provisioned key to persistent storage and then if the app crashes, anyone with access to persistent storage can ask for the secret trough the KMS and decrypt state, the new trusted domain can now attest to the smart contract that they're running the latest version of the app's state. 
+We can still tackle 2 through the KMS: peers within $\Pi$ dump state that's encrypted with the KMS' provisioned key to persistent storage and then if the app crashes, anyone with access to persistent storage can ask for the secret through the KMS and decrypt state, the new trusted domain can now attest to the smart contract that they're running the latest version of the app's state. 
 
 Not good enough tho, we're still relying on the KMS to be available. 
 
 What about re-using this last approach but with the state dumps encrypted to multiple secret shards that are provisioned to members of a council when dumping such data (really, they just need to be gossiped with e.g DH)?
 
-But a council is no good? Well, not really. If we're talking about liveness **(and safety!!)** in TEEs, almost every complex $\Pi$ will have some concept of council/governance/quorum/trust relation/federation whatever you want to call it. Why? Even just updating the trusted domain measurements would require to introduce such concept, and guess what's one of the reasons why we're scared that trusted domains will crash? Bugs that need to be patched and whose patches need to be shipped to production. That's something the KMS relies on as well!
+But a council is no good? Well, not really. If we're talking about liveness **(and safety!!)** in TEEs, almost every complex $\Pi$ will have some concept of council/governance/quorum/trust relation/federation whatever you want to call it. Why? Even just updating the trusted domain measurements would require us to introduce such concept, and guess what's one of the reasons why we're scared that trusted domains will crash? Bugs that need to be patched and whose patches need to be shipped to production. That's something the KMS relies on as well!
 
 Anyways, the council is especially helpful here for applications whose encrypted state is not overly sensitive. 
 In the case that the encrypted state was indeed highly sensitive, the attack complexity doesn't really change; only the attack surface over time:
@@ -79,7 +79,7 @@ In the case that the encrypted state was indeed highly sensitive, the attack com
 
 Note that since we're strictly talking about confidentiality of encrypted data dumps that may already be in the hands of the adversary (in fact, it should be in the hands of everyone!), the KMS can't employ many counter measures. 
 
-The only thing that changes here is that implementing secret sharing so that it mimics complex governance is more difficult and that attacking on shared secrets whose shards are intelligently handled to mimic complex governance systems can be retroactive:
+The only thing that changes here is that implementing secret sharing so that it mimics complex governance is more difficult, additionally carrying on an attack on shared secrets whose shards are intelligently handled to mimic complex governance systems is retroactive:
 
 - t1: $\Pi$'s state dumps are published and encrypted to 3 shards with a threshold of 2.
 - t2: $\Pi$ improves its council's safety so from now on the state dumps are encrypted to 10 shards with a threshold of 7.
@@ -90,7 +90,7 @@ In the above scenario the adversary can attach state between t1 and t2 by just c
 
 # Conclusion
 
-There's no perfect solution, but for some $\Pi$s the KMS might or might not be the best solution depending on the preconditions the specific application grants us. Curious to see what others think in relation to what they're building, I'm sure there's many other different perspectives that I am missing. For example, if $\Pi$ must guaratnee confidentiality at all costs, a redundant SGX-based kms setup might be the way to go. 
+There's no perfect solution, but for some $\Pi$s the KMS might or might not be the best solution depending on the preconditions the specific application grants us. Curious to see what others think in relation to what they're building, I'm sure there's many other different perspectives that I am missing. For example, if $\Pi$ must guarantee confidentiality at all costs, a redundant SGX-based kms setup might be the way to go. 
 
 In the case of Tplus however, the worst that can happen if the adversary takes over the secret shards is plaintext user inventories. This ability to have some slack on the confidentiality end of things led us to the thought process behind the above-described behavior.
 

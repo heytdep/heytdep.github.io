@@ -108,7 +108,7 @@ key exchange) it across attested peers.</li>
 <li>Have trusted domains attest on-chain to our contract (+potential
 additional requirements, but that takes us out of the generic context
 I’m setting up), once attested the specific trusted domain’s signing key
-becomes (one of) the signer in the contract.</li>
+becomes (one of) the authorized signers in the contract.</li>
 </ol>
 <p>For 2 to work however, we should be guaranteed that the trusted
 domain that is now operating as a privileged signer on the contract is
@@ -123,7 +123,7 @@ it’s not enough.</p>
 class="math inline"><em>Π</em></span> dump state that’s encrypted with
 the KMS’ provisioned key to persistent storage and then if the app
 crashes, anyone with access to persistent storage can ask for the secret
-trough the KMS and decrypt state, the new trusted domain can now attest
+through the KMS and decrypt state, the new trusted domain can now attest
 to the smart contract that they’re running the latest version of the
 app’s state.</p>
 <p>Not good enough tho, we’re still relying on the KMS to be
@@ -137,9 +137,9 @@ liveness <strong>(and safety!!)</strong> in TEEs, almost every complex
 <span class="math inline"><em>Π</em></span> will have some concept of
 council/governance/quorum/trust relation/federation whatever you want to
 call it. Why? Even just updating the trusted domain measurements would
-require to introduce such concept, and guess what’s one of the reasons
-why we’re scared that trusted domains will crash? Bugs that need to be
-patched and whose patches need to be shipped to production. That’s
+require us to introduce such concept, and guess what’s one of the
+reasons why we’re scared that trusted domains will crash? Bugs that need
+to be patched and whose patches need to be shipped to production. That’s
 something the KMS relies on as well!</p>
 <p>Anyways, the council is especially helpful here for applications
 whose encrypted state is not overly sensitive. In the case that the
@@ -157,9 +157,9 @@ encrypted data dumps that may already be in the hands of the adversary
 (in fact, it should be in the hands of everyone!), the KMS can’t employ
 many counter measures.</p>
 <p>The only thing that changes here is that implementing secret sharing
-so that it mimics complex governance is more difficult and that
-attacking on shared secrets whose shards are intelligently handled to
-mimic complex governance systems can be retroactive:</p>
+so that it mimics complex governance is more difficult, additionally
+carrying on an attack on shared secrets whose shards are intelligently
+handled to mimic complex governance systems is retroactive:</p>
 <ul>
 <li>t1: <span class="math inline"><em>Π</em></span>’s state dumps are
 published and encrypted to 3 shards with a threshold of 2.</li>
@@ -183,7 +183,7 @@ best solution depending on the preconditions the specific application
 grants us. Curious to see what others think in relation to what they’re
 building, I’m sure there’s many other different perspectives that I am
 missing. For example, if <span class="math inline"><em>Π</em></span>
-must guaratnee confidentiality at all costs, a redundant SGX-based kms
+must guarantee confidentiality at all costs, a redundant SGX-based kms
 setup might be the way to go.</p>
 <p>In the case of Tplus however, the worst that can happen if the
 adversary takes over the secret shards is plaintext user inventories.
