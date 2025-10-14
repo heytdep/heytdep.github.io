@@ -459,8 +459,7 @@ fn gen_index_content(mut posts: Vec<String>) -> String {
             <a href="https://x.com/heytdep" target="__blank"><div class="subtitle">@heytdep</div></a>
             
             <div class="bio">
-                <p>Co-founder <a target="_blank" href="https://github.com/xycloo/">Xycloo Labs</a>.</p>
-                <p>Working with VMs, cloud computing infra, TEEs and blockchain. Interested in research about VMs, MeV, validators, TEEs, and DeFi.</p>
+                <p>founding eng/research new thing <a href="https://x.com/tplus_cx">@tplus_cx</a>, co-founder <a href="https://x.com/xyclooLabs">@xyclooLabs</a>, trusted (?) execution | 🦀<p/>
                 <p class="note">Articles with the &#128215 suffix are intended for general public, 
                    &#128216 are personal notes.</p>
             </div>
