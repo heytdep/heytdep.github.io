@@ -1,0 +1,165 @@
+<p><code>19/01/2026</code></p>
+<h2 id="problem">Problem</h2>
+<p>TDX attestation proves that your code is running inside a
+hardware-isolated Trust Domain with specific measurements. Intel’s
+Quoting Enclave signs the quote, and you can verify the signature
+against Intel’s root of trust. This gives you strong guarantees about
+integrity and isolation.</p>
+<p>But TDX attestation doesn’t tell you where the TD is running or who
+is hosting it. When physical safety is important for the application’s
+safety (which in an ideal architecture falls back solely on liveness)
+then knowing who is hosting the hardware and making sure we partially
+trust them is important.</p>
+<p>The TDX quote is signed by Intel which doesn’t know or care whether
+your TD is on GCP, Azure, or an attacker’s machine; if it’s valid TDX
+hardware, it gets a valid quote.</p>
+<h2 id="vtpm">vTPM</h2>
+<p>GCP provisions a virtual TPM alongside each CVM. The vTPM has an
+Attestation Key (AK) that can sign quotes, and critically, the AK comes
+with a certificate chain that roots back to the cloud provider’s CA.</p>
+<p>If you can prove that a specific vTPM is attached to the TD, and that
+vTPM’s AK certificate chains to GCP’s root CA, then you’ve proven the TD
+is running on GCP infrastructure.</p>
+<p>The challenge is proving that binding so that no party besides the
+one holding the AK secret can tamper with this logic.</p>
+<h2 id="event-logs-cross-checks">Event Logs Cross-Checks</h2>
+<p>The CCEL and TCG event logs are essential for proving the binding
+between the two processes since when the CVM boots, the same boot events
+get measured to both RTMRs (TD) and PCRs (vTPM).</p>
+<p>Each measurement recorded during boot produces a digest that gets
+extended to both an RTMR and a PCR. The digest values are eventually
+identical but differ in the target register, some technlogy-specific
+params and the order of concatenation.</p>
+<p>The CCEL records what was extended to the RTMRs. The TCG log records
+what was extended to the PCRs. By replaying both logs and comparing the
+digests, you can verify that the vTPM observed the exact same boot
+sequence as the TD.</p>
+<p>This is the fundamental binding. If GCP tried to proxy a different
+vTPM to your TD, or more realistically, an attacker tries to proxy a GCP
+vtpm on their physically controlled TD, that vTPM would have observed a
+different boot sequence. Its TCG event log would contain different
+digests and the cross-check would fail.</p>
+<h2 id="verification-approaches">Verification Approaches</h2>
+<p>There are two ways to structure the verification, differing in where
+the cross-check happens and what the verifier has to trust. Because
+verification is often carried on trustless processes which require more
+efficiency, the second approach is what most applications will take. But
+it’s worth it to mention the first approach so that it’s easier to
+understand the concept.</p>
+<h3 id="approach-1">Approach 1</h3>
+<p>The verifier performs the cross-check themselves. The TD provides all
+the raw materials:</p>
+<ul>
+<li>TDX quote</li>
+<li>vTPM quote</li>
+<li>CCEL event log</li>
+<li>TCG event log</li>
+<li>AK public key and certificate chain</li>
+</ul>
+<p>The verifier then:</p>
+<ol type="1">
+<li>Verifies the TDX quote.</li>
+<li>Replays the CCEL and checks that computed RTMRs match the TDX
+quote.</li>
+<li>Verifies the vTPM quote signature using the AK.</li>
+<li>Replays the TCG log and checks that computed PCRs match the vTPM
+quote.</li>
+<li>Cross-checks that CCEL and TCG contain events with identical
+digests.</li>
+<li>Verifies the AK certificate chains to the expected cloud
+provider.</li>
+</ol>
+<p>This approach requires no trust in the TD’s code for what regards the
+TD&lt;&gt;vTPM binding. The verifier does all the work and trusts only
+their own verification logic.</p>
+<blockquote>
+<p>NB: the verifier generally needs to measure/trust the TD’s code
+anyways.</p>
+</blockquote>
+<h3 id="approach-2">Approach 2</h3>
+<p>The TD performs the cross-check internally, and the verifier trusts
+the TD’s measured code to have done it correctly.</p>
+<p>The TD’s logic (which is captured in the measurments):</p>
+<ol type="1">
+<li>Replays the CCEL.</li>
+<li>Replays TCG event log.</li>
+<li>Gets a vTPM quote and verifies PCRs match the replayed TCG
+values.</li>
+<li>Cross-checks that CCEL and TCG digests match.</li>
+<li>If everything passes, puts the AK public key hash in report_data and
+generates a TDX quote <span
+class="math inline"><em>Q</em><sub><em>A</em><em>K</em></sub></span>.</li>
+</ol>
+<p>The TD then provides only:</p>
+<ul>
+<li><span
+class="math inline"><em>Q</em><sub><em>p</em><em>u</em><em>b</em><em>k</em><em>e</em><em>y</em>(<em>A</em><em>T</em>)</sub></span>.</li>
+<li>AK pubkey + certificate chain until GCP root of trust.</li>
+</ul>
+<p>The verifier:</p>
+<ol type="1">
+<li>Verifies the TDX quote.</li>
+<li>Checks that report_data contains SHA384(pubkey(AK))</li>
+<li>Verifies the AK certificate chains to the expected cloud
+provider</li>
+</ol>
+<p>The verifier doesn’t need the event logs at all. They’re trusting
+that the code producing those specific RTMR values performed the
+cross-check correctly which is a reasonable trust assumption if the TD
+code is open source and the measurements are reproducible.</p>
+<h4 id="understanding-what-each-piece-proves">Understanding What Each
+Piece Proves</h4>
+<p>The CCEL/TCG cross-check proves that this specific vTPM observed the
+same boot sequence as this TD. This is the actual binding between the
+two attestation domains; there’s no other way to prove the vTPM is
+attached to your TD. The AK in report_data proves that the TD’s measured
+code validated that binding before committing to this AK. It moves the
+verification burden from the verifier to the TD and lets the verifier
+run a simpler protocol. The AK certificate chain proves that this vTPM
+belongs to a specific cloud provider’s infrastructure.</p>
+<h2 id="some-implementation-details">Some Implementation Details</h2>
+<p>In TD, must collect:</p>
+<pre><code># CCEL
+/sys/firmware/acpi/tables/data/CCEL
+
+# TCG event log
+/sys/kernel/security/tpm0/binary_bios_measurements
+
+# AK certificate
+tpm2_nvread 0x1c10002 -o ak_cert.der</code></pre>
+<p>Both logs use the TCG crypto-agile format. For each event:</p>
+<ol type="1">
+<li>Read the target register index (CC_MR_INDEX for CCEL, PCR index for
+TCG)</li>
+<li>Read the event type</li>
+<li>Read the digest (SHA384 for TDX)</li>
+<li>If event type is not EV_NO_ACTION, extend the register</li>
+</ol>
+<p>Extend operation is:
+<code>register_new = SHA384(register_old || digest)</code></p>
+<blockquote>
+<p>NB: For CCEL, the CC_MR_INDEX uses an offset since it includes the
+mrtd which is immutable:</p>
+<ul>
+<li>CC_MR_INDEX 1 = RTMR[0]</li>
+<li>CC_MR_INDEX 2 = RTMR[1]</li>
+<li>CC_MR_INDEX 3 = RTMR[2]</li>
+<li>CC_MR_INDEX 4 = RTMR[3]</li>
+</ul>
+</blockquote>
+<p>Once all events are replayed, the computed register values should
+match the values in the respective quotes.</p>
+<p>Extract all (event_type, digest) pairs from both logs, excluding zero
+digests and EV_NO_ACTION events and find the intersection, i.e boot
+events measured to both the RTMRs and PCRs.</p>
+<p>If the intersection is empty, the logs don’t share common
+measurements and the binding cannot be established. If there are common
+events with identical digests, those events bind the two attestation
+domains together. Once this passes, we can construct TDX quote with the
+AK pubkey as report data, i.e now that quote now commits to this
+specific AK, and the RTMR values commit to the code that validated the
+binding.</p>
+<p>For the TD-internal verification approach, which applications that
+require a simpler protocol on the verifier will most likely favor, the
+verifier must have context over the TDX quote, the AK root of trust and
+the expected measurements for the TD.</p>
