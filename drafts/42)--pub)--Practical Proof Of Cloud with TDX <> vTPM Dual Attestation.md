@@ -82,6 +82,10 @@ The verifier doesn't need the event logs at all. They're trusting that the code 
 
 The CCEL/TCG cross-check proves that this specific vTPM observed the same boot sequence as this TD. This is the actual binding between the two attestation domains; there's no other way to prove the vTPM is attached to your TD. The AK in report_data proves that the TD's measured code validated that binding before committing to this AK. It moves the verification burden from the verifier to the TD and lets the verifier run a simpler protocol. The AK certificate chain proves that this vTPM belongs to a specific cloud provider's infrastructure. 
 
+### Bonus approach
+
+Another possible approach is embedding the root of trust within the TDs context, then the measurements capture it and the root of trust verification of the AK is all encompassed within the TD. This however means having to embed the RoT within the application's inner measurements values which may not be the best option for some use cases.
+
 ## Some Implementation Details
 
 In TD, must collect:
