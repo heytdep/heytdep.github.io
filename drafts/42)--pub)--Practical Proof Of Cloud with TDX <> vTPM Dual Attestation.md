@@ -84,7 +84,18 @@ The CCEL/TCG cross-check proves that this specific vTPM observed the same boot s
 
 ### Bonus approach
 
-Another possible approach is embedding the root of trust within the TDs context, then the measurements capture it and the root of trust verification of the AK is all encompassed within the TD. This however means having to embed the RoT within the application's inner measurements values which may not be the best option for some use cases.
+Another possible approach is embedding the root of trust within the TDs context, then the measurements capture it and the root of trust verification of the AK is all encompassed within the TD. This however means having to embed the RoT within the application's inner measurements values which may not be the best option for some use cases. 
+
+The advantage of such approach is keeping the attestation verifier protocol as lightweight as possible by completely encompassing in the tdx measurements also the certificate's root of trust reference and its verification.
+
+This means that the trusted domain must have logic to deal with certificate rotation as well and that such logic must be encompassed in the measurements as well. In my opinion, the most appropriate home for such logic lies in the guest operating system abstracting it from the application. The application shouldn't care about replaying CCEL and TCG event logs so why should it care about how the root of trust is obtained for verifying the vTPMs quote RoT?
+
+However, we encounter a small contradiction here if we assume the root of trust can rotate. The OS should take care of verifying the root of trust's provenance but that must be dynamic to support changing it but safe at the same time. A common approach for such configs is to time-lock them behind a multisignature from a trusted committee. If this logic must however live in the OS we are in a contradictory territory as trusted committees are most likely part of the application layer. We're then left with two possibilities that keep the RoT provenance logic in OS:
+
+1. extend application measurements with a target registry that the OS's logic will use to obtain the RoT reference. In this scenario the registry could be a smart contract which must follow a standard specification so that the OS logic thus its measurement doesn't need to change depending on the application layer.
+2. since the RoT comes from a non-deterministic source (of course, unless guarded behind a trusted committee and stored on a deterministic system as in the first scenario) then we can pull such RoT from official registries etc. This however defers the verification protocol's safety to yet another component. Depending on the security guarantees the retrieval on such channel gives this may be a good or bad solution. 
+
+In both cases however, the guest OS takes care of this abstraction for the application layer. If the application layer requires composable safety the first option is more suitable. The beauty of approach 1 is that applications that prefer to fully abstract such logic can rely on a shared registry as long as they trust the operators.
 
 ## Some Implementation Details
 
