@@ -2,7 +2,7 @@
 
 > I'm not a cryptographer, just a curious person working with applied cryptography to solve distributed systems problems. Feel free to call out any incorrect/imprecise maths, constraints or even logic!
 
-(rust reference implementation available at https://github.com/heytdep/rs-wkem-dcap-circom)
+(rust reference implementation available at [https://github.com/heytdep/rs-wkem-dcap-circom](https://github.com/heytdep/rs-wkem-dcap-circom)).
 
 Classic asymmetric encryption schemes are widely used and incredibly effective for any sort of communication between two known parties, it is for instance the exact construction we use for P2P communication between two peers which must prove they are attested beforehand while making the connection; the attestation part can occur in multiple places in respect to the handshake but you get the point.
 
