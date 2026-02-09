@@ -16,12 +16,12 @@ algorithm.</p>
 <p>There are a couple of other things to keep in mind: - the contract
 has to be initialized by a game admin, which specifies some settings. -
 if a user doesn’t reveal its move after <span
-class="math inline"><em>Δ</em><em>t</em></span> (specified upon
-initialization) since the second player submitted their move, a user can
-call the <code>cancel</code> function, which resets the game and sends
-all the betted money to the user who revealed its move (since it
-assuments that the other user won’t reveal theirs since they know the
-other user has already won).</p>
+class="math inline">\(\Delta t\)</span> (specified upon initialization)
+since the second player submitted their move, a user can call the
+<code>cancel</code> function, which resets the game and sends all the
+betted money to the user who revealed its move (since it assuments that
+the other user won’t reveal theirs since they know the other user has
+already won).</p>
 <h1 id="writing-the-contract">Writing the contract</h1>
 <blockquote>
 <p>Reading this README assumes that you already have basic soroban
@@ -350,7 +350,7 @@ important settings: - <code>token</code>: the tokenID the contract will
 use. - <code>bet_amount</code>: the ammount of <code>token</code> that
 users will have to bet in order to enter the game. -
 <code>ts_diff</code>: the previously-mentioned <span
-class="math inline"><em>Δ</em><em>t</em></span>.</p>
+class="math inline">\(\Delta t\)</span>.</p>
 <div class="sourceCode" id="cb8"><pre
 class="sourceCode rust"><code class="sourceCode rust"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> initialize(</span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>        e<span class="op">:</span> Env<span class="op">,</span></span>
@@ -464,11 +464,10 @@ class="sourceCode rust"><code class="sourceCode rust"><span id="cb11-1"><a href=
 <h3 id="cancel">Cancel</h3>
 <p>This function can also be called by anyone. It prevents the problem
 of users not revealing their moves after seeing the competitor’s
-revealed move. In fact, if <span
-class="math inline"><em>Δ</em><em>t</em></span> has passed since the
-second user has made their move, and one of the two users didn’t reveal
-their move, the user who revealed the move receives the whole betted
-amount:</p>
+revealed move. In fact, if <span class="math inline">\(\Delta t\)</span>
+has passed since the second user has made their move, and one of the two
+users didn’t reveal their move, the user who revealed the move receives
+the whole betted amount:</p>
 <div class="sourceCode" id="cb12"><pre
 class="sourceCode rust"><code class="sourceCode rust"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> cancel(e<span class="op">:</span> Env) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> <span class="bu">Error</span><span class="op">&gt;</span> <span class="op">{</span></span>
 <span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="pp">TimeStamp::</span>current(<span class="op">&amp;</span>e)<span class="op">.</span>sub(get_ts_limit(<span class="op">&amp;</span>e)) <span class="op">&lt;</span> get_bet_start(<span class="op">&amp;</span>e) <span class="op">{</span></span>

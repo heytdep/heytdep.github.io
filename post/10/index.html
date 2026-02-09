@@ -2,10 +2,10 @@
 works well and scales easily given its simplicity. In a Dutch auction,
 the auctioneer initializes the auction with a starting price, which is
 lowered as time passes until a bid is received. The <span
-class="math inline"><em>p</em><em>r</em><em>i</em><em>c</em><em>e</em> = <em>f</em>(<em>Δ</em><em>t</em><em>i</em><em>m</em><em>e</em>)</span>
-function does not have to conform to any specific function group, but in
-this auction contract we resembled a linear function since Soroban
-doesn’t currently have support for fixed point math.</p>
+class="math inline">\(price = f(\Delta time)\)</span> function does not
+have to conform to any specific function group, but in this auction
+contract we resembled a linear function since Soroban doesn’t currently
+have support for fixed point math.</p>
 <h1 class="unnumbered" id="contract-description">Contract
 Description</h1>
 <p>Such auction contract should provide three invocation functions:</p>
@@ -21,15 +21,14 @@ doens’t reach a price of 0 by default</p></li>
 <li><p>a slope, so how fast the price decreases over time. Keep in mind
 that in this contract implementation, it is more an "inverse slope",
 meaning that the price equation won’t look like this <span
-class="math inline"><em>y</em> = −<em>m</em><em>x</em> + <em>k</em></span>,
-but like this <span class="math inline">$y = \frac{x}{-m} + k$</span>
-where <span class="math inline"><em>y</em></span> is the price, <span
-class="math inline"><em>x</em></span> is the time that has passed since
-the initialization of the auction, <span
-class="math inline"><em>k</em></span> is the starting price, and <span
-class="math inline"><em>m</em></span> is our "inverse slope". This means
-that our slope is inversely proportional to the speed to which the price
-decreases.</p></li>
+class="math inline">\(y = -mx + k\)</span>, but like this <span
+class="math inline">\(y = \frac{x}{-m} + k\)</span> where <span
+class="math inline">\(y\)</span> is the price, <span
+class="math inline">\(x\)</span> is the time that has passed since the
+initialization of the auction, <span class="math inline">\(k\)</span> is
+the starting price, and <span class="math inline">\(m\)</span> is our
+"inverse slope". This means that our slope is inversely proportional to
+the speed to which the price decreases.</p></li>
 </ul>
 <pre><code>fn initialize(
         e: Env,
@@ -76,8 +75,8 @@ tokens to the buyer</p>
     empty_contract(&amp;e, from); // transfer the prize from the contract to the bidder
 }</code></pre>
 <p>where <code>compute_price</code> simply solves the above mentioned
-price equation <span class="math inline">$f(\Delta price) = \frac{x}{-m}
-+ k$</span>:</p>
+price equation <span class="math inline">\(f(\Delta price) =
+\frac{x}{-m} + k\)</span>:</p>
 <pre><code>fn compute_price(e: &amp;Env) -&gt; BigInt {
     let starting_price = get_starting_price(e);
     let minimum_price = get_minimum_price(e);
@@ -116,19 +115,17 @@ bidder).</p></li>
 <li><p>starting price of 5 usdc.</p></li>
 <li><p>minimum price of 1 usdc.</p></li>
 <li><p>slope of 900, so that the auction reaches the minimum price in an
-hour (3600, since <span
-class="math inline">5 − (3600/900) = 1 = <em>m</em><em>i</em><em>n</em><em>i</em><em>m</em><em>u</em><em>m</em><em>p</em><em>r</em><em>i</em><em>c</em><em>e</em></span>).</p></li>
+hour (3600, since <span class="math inline">\(5 - (3600/900) = 1 =
+minimum price\)</span>).</p></li>
 <li><p>mint TEST tokens to the admin, and then transfer them into the
 contract (this is the prize).</p></li>
 <li><p>mint usdc to the bidder so that they can bid.</p></li>
-<li><p>update ledger time to simulate <span
-class="math inline"><em>Δ</em><em>t</em><em>i</em><em>m</em><em>e</em> = 1800</span>,
-which is the same as saying that half an hour has passed since the
-beginning of the auction.</p></li>
+<li><p>update ledger time to simulate <span class="math inline">\(\Delta
+time = 1800\)</span>, which is the same as saying that half an hour has
+passed since the beginning of the auction.</p></li>
 <li><p>allow the auction contract to transfer <span
-class="math inline"><em>n</em></span> usdc out of the bidder’s account,
-where <span class="math inline"><em>n</em></span> is the computed
-price.</p></li>
+class="math inline">\(n\)</span> usdc out of the bidder’s account, where
+<span class="math inline">\(n\)</span> is the computed price.</p></li>
 <li><p>bidder makes the bid.</p></li>
 <li><p>finally, make all required assertion to verify that the auction
 worked as excpected.</p></li>

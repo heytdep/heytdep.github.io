@@ -87,13 +87,11 @@ the TD’s measured code to have done it correctly.</p>
 values.</li>
 <li>Cross-checks that CCEL and TCG digests match.</li>
 <li>If everything passes, puts the AK public key hash in report_data and
-generates a TDX quote <span
-class="math inline"><em>Q</em><sub><em>A</em><em>K</em></sub></span>.</li>
+generates a TDX quote <span class="math inline">\(Q_{AK}\)</span>.</li>
 </ol>
 <p>The TD then provides only:</p>
 <ul>
-<li><span
-class="math inline"><em>Q</em><sub><em>p</em><em>u</em><em>b</em><em>k</em><em>e</em><em>y</em>(<em>A</em><em>T</em>)</sub></span>.</li>
+<li><span class="math inline">\(Q_{pubkey(AT)}\)</span>.</li>
 <li>AK pubkey + certificate chain until GCP root of trust.</li>
 </ul>
 <p>The verifier:</p>

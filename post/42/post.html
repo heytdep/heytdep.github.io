@@ -13,11 +13,22 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
     <script>
+    window.MathJax = {
+        startup: {
+            typeset: false
+        }
+    };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
     fetch("./index.html").then(resp => resp.text().then(content => {
         const post = document.createElement("div");
-        post.innerHTML =content;
+        post.innerHTML = content;
         document.getElementById("post").appendChild(post);
         hljs.highlightAll();
+        if (window.MathJax && MathJax.typesetPromise) {
+            MathJax.typesetPromise();
+        }
     }));
     /*
     function resizeIframe(obj) {
@@ -41,7 +52,7 @@
     <body>
     <div id="post">
     <h4><a href="/">see all posts</a></h1>
-    <h1 class="title">Practical Proof Of Cloud with TDX <> vTPM Dual Attestation</h1>
+    <h1 class="title">Practical Proof Of Cloud with TDX <> vTPM Dual Attestation copy</h1>
     <!--<iframe src="./index.html" frameborder="0" scrolling="no" width="100%" onload="resizeIframe(this)" />-->
     </div>
         <script>

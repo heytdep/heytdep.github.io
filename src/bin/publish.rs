@@ -118,11 +118,22 @@ fn build_handler(name: String) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
     <script>
+    window.MathJax = {{
+        startup: {{
+            typeset: false
+        }}
+    }};
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
     fetch("./index.html").then(resp => resp.text().then(content => {{
         const post = document.createElement("div");
-        post.innerHTML =content;
+        post.innerHTML = content;
         document.getElementById("post").appendChild(post);
         hljs.highlightAll();
+        if (window.MathJax && MathJax.typesetPromise) {{
+            MathJax.typesetPromise();
+        }}
     }}));
     /*
     function resizeIframe(obj) {{
@@ -192,6 +203,7 @@ fn to_html_pd(name: String) {
                 .arg("latex")
                 .arg("-t")
                 .arg("html")
+                .arg("--mathjax")
                 .arg(format!("./drafts/{}", name))
                 .arg("-o")
                 .arg(format!("./post/{}/index.html", &dir_name))
@@ -209,6 +221,7 @@ fn to_html_pd(name: String) {
                 .arg("markdown")
                 .arg("-t")
                 .arg("html")
+                .arg("--mathjax")
                 .arg(format!("./drafts/{}", name))
                 .arg("-o")
                 .arg(format!("./post/{}/index.html", &dir_name))

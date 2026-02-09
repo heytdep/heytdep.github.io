@@ -2,11 +2,11 @@
 <p>The Paulette, was a law enforced by France in the beginning of the
 17th century. It allowed the king to sell the ownership of public
 offices (making them hereditary). The owners of these public offices had
-to pay a tax each <span class="math inline"><em>Δ</em><em>t</em></span>
-to keep a bought public office. These offices expire every <span
-class="math inline"><em>Δ</em><em>t</em></span> and the owner of each
-office has to pay a tax to maintain the ownership, if they didn’t pay
-this tax, the office could be revoked by the king.</p>
+to pay a tax each <span class="math inline">\(\Delta t\)</span> to keep
+a bought public office. These offices expire every <span
+class="math inline">\(\Delta t\)</span> and the owner of each office has
+to pay a tax to maintain the ownership, if they didn’t pay this tax, the
+office could be revoked by the king.</p>
 <h1 class="unnumbered" id="actual-implementation-abstract">Actual
 implementation Abstract</h1>
 <p>The contract admin can create new offices and put them for sale by
@@ -15,8 +15,8 @@ href="https://github.com/Xycloo/soroban-dutch-auction-contract">Soroban
 Dutch Auction Contract</a>. This means that these offices start with a
 certain price which decreases with time. Users can then buy these
 offices at the auction’s price and become the owners. The offices expire
-after a week ( <span class="math inline">604800<em>s</em></span> ), and
-can be renewed by paying a tax (ideally less than the price at which the
+after a week ( <span class="math inline">\(604800s\)</span> ), and can
+be renewed by paying a tax (ideally less than the price at which the
 office was bought). If more than a week goes by and the owner hasn’t
 paid the tax yet, the admin can revoke the office and put it for sale in
 an auction again.</p>

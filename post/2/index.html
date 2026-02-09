@@ -21,14 +21,14 @@ href="https://xn--2-umb.com/22/groth16/index.html#trusted-setup">here</a>.
 The proof is generated starting from a witness, or private field (and)
 public statements, or public fields, and the proving key. These steps
 rely on randomly-generated values <span
-class="math inline"><em>τ</em>, <em>α</em>, <em>β</em>, <em>γ</em></span>
- that must not be exposed for the security of the proving/verfying
-system, since they could allow a potentially malicious attacker to
-compute a valid proof <span class="math inline"><em>π</em></span> with
-an invalid private field. Also, all of the computations rely on using
-three elliptic curve groups and correspondig generators <span
-class="math inline"><em>G</em><sub>1</sub>, <em>G</em><sub>2</sub>, <em>G</em><sub>3</sub></span>
-and a pairing (<a href="https://xn--2-umb.com/22/pairings/index.html"
+class="math inline">\(\tau,\alpha,\beta,\gamma\)</span>  that must not
+be exposed for the security of the proving/verfying system, since they
+could allow a potentially malicious attacker to compute a valid proof
+<span class="math inline">\(\pi\)</span> with an invalid private field.
+Also, all of the computations rely on using three elliptic curve groups
+and correspondig generators <span class="math inline">\(G_1, G_2,
+G_3\)</span> and a pairing (<a
+href="https://xn--2-umb.com/22/pairings/index.html"
 class="uri">https://xn--2-umb.com/22/pairings/index.html</a>).</p>
 <p>I’ve already built my verification key and my proof, and I want to
 tell the verifier that I know the two hash images <code>i</code> and
@@ -247,21 +247,21 @@ assumptions, you should double-check them):</p>
 <h2 id="pairing">Pairing</h2>
 <p>EC pairings are how we actually implement verification. We define a
 pairing function:</p>
-<p><span
-class="math display"><em>e</em> : <em>G</em><sub>1</sub> × <em>G</em><sub>2</sub> → <em>G</em><sub><em>t</em></sub></span></p>
+<p><span class="math display">\[e: G_1 \times  G_2 \rightarrow
+G_t\]</span></p>
 <p>Which isn’t degenerate and that respects bilinearity:</p>
-<p><span
-class="math display"><em>e</em>(<em>m</em> × <em>P</em>1, <em>n</em> × <em>P</em>2) = <em>e</em>(<em>P</em>1, <em>P</em>2)<sup>(<em>m</em> * <em>n</em>)</sup></span></p>
+<p><span class="math display">\[e ( m \times P1, n \times P2) = e ( P1,
+P2 ) ^ ( m * n )\]</span></p>
 <p>We can then verify that:</p>
-<p><span
-class="math display"><em>e</em>(<em>a</em><sub>1</sub>, <em>b</em><sub>1</sub>) × <em>e</em>(<em>a</em><sub>2</sub>, <em>b</em><sub>2</sub>) × <em>e</em>(<em>a</em><sub>3</sub>, <em>b</em><sub>3</sub>)... × <em>e</em>(<em>a</em><sub><em>k</em></sub>, <em>b</em><sub><em>k</em></sub>) = 1</span></p>
+<p><span class="math display">\[e ( a_1, b_1) \times e ( a_2, b_2 )
+\times e ( a_3, b_3 ) ... \times e ( a_k, b_k ) = 1\]</span></p>
 <p>This is how the EIP-197 implementation works.</p>
 <p>We aggregate our inputs into (<span
-class="math inline"><em>L</em></span>), we have to check (starting from
-the <a
-href="https://xn--2-umb.com/22/pairings/index.html">pairing</a>):</p>
-<p><span
-class="math display"><em>e</em>(<em>A</em>, <em>B</em>) = <em>e</em>(<em>α</em> × <em>G</em><sub>1</sub>, <em>β</em>  × <em>G</em><sub>2</sub>) + <em>e</em>(<em>L</em>, <em>γ</em> × <em>G</em><sub>2</sub>) + <em>e</em>(<em>C</em>, <em>δ</em> × <em>G</em><sub>2</sub>)</span></p>
+class="math inline">\(L\)</span>), we have to check (starting from the
+<a href="https://xn--2-umb.com/22/pairings/index.html">pairing</a>):</p>
+<p><span class="math display">\[e(A, B) = e(\alpha \ \times \ G_1, \
+\beta \ \times G_2) + e(L, \ \gamma \ \times \ G_2) + e(C, \ \delta \
+\times \ G_2)\]</span></p>
 <p>Where <code>A</code>, <code>B</code>, <code>C</code> are the proof,
 <code>L</code> is the aggregation of the inputs.</p>
 <p>The implementation for the bn128 pairing (by <a
@@ -269,18 +269,16 @@ href="https://vitalik.ca">vitalik</a>) can be found <a
 href="https://github.com/ethereum/py_pairing/blob/master/py_ecc/bn128/bn128_pairing.py#L68">here</a>.</p>
 <p> </p>
 <p>The equation becomes:</p>
-<p><span
-class="math display">(<em>P</em><sub><em>a</em></sub> × <em>P</em><sub><em>b</em></sub>) × (<em>L</em><sub><em>i</em></sub> × (−<em>V</em><em>K</em><sub><em>γ</em></sub>)) × (<em>P</em><sub><em>c</em></sub> × (−<em>V</em><em>K</em><sub><em>δ</em></sub>)) = <em>V</em><em>K</em><sub><em>α</em></sub> × <em>V</em><em>K</em><sub><em>β</em></sub></span></p>
-<p>Where <span
-class="math inline"><em>G</em><sub>1</sub> × <em>G</em><sub>2</sub></span>
-corresponds to <span
-class="math inline"><em>e</em>(<em>G</em><sub>1</sub>, <em>G</em><sub>2</sub>)</span>.
-Note how all pairings involve one point in <span
-class="math inline"><em>G</em><sub>1</sub></span> and one in <span
-class="math inline"><em>G</em><sub>2</sub></span>.</p>
+<p><span class="math display">\[( P_a \times P_b ) \times ( L_i \times (
+- VK_{\gamma} ) ) \times ( P_c \times ( - VK_{\delta} ) ) = VK_{\alpha}
+\times VK_{\beta}\]</span></p>
+<p>Where <span class="math inline">\(G_1 \times G_2\)</span> corresponds
+to <span class="math inline">\(e ( G_1 , G_2 )\)</span>. Note how all
+pairings involve one point in <span class="math inline">\(G_1\)</span>
+and one in <span class="math inline">\(G_2\)</span>.</p>
 <p>This only requires three pairings assuming that <span
-class="math inline"><em>V</em><em>K</em><sub><em>α</em></sub> × <em>V</em><em>K</em><sub><em>β</em></sub></span>
-has already been computed when preparing the verifiying key.</p>
+class="math inline">\(VK_{\alpha} \times VK_{\beta}\)</span> has already
+been computed when preparing the verifiying key.</p>
 <p>This leaves us with the following code:</p>
 <pre><code>  let inputs = prepare_inputs(&amp;prep_vk, &amp;[image]);
 

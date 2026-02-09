@@ -328,21 +328,16 @@ that the user already has allowed the contract to do so as we will see
 when testing the contract, if not this function will panic). Then it
 calculates the amount of shares to mint, which respects the following
 equation:</p>
-<p><span
-class="math inline">(<em>S</em> + <em>s</em>) ÷ <em>S</em> = (<em>a</em> + <em>B</em>) ÷ <em>B</em></span></p>
+<p><span class="math inline">\(( S + s ) \div S = ( a + B ) \div
+B\)</span></p>
 <p>where S is the total supply, s is the amount of shares to mint, a is
 the amount of tokens the user has deposited into the vault, and B is the
 token balance of the vault (without taking into account the tokens
 deposited by the user).</p>
 <p>We can simplify this simple equation like this:</p>
-<p><span
-class="math display"><em>B</em><em>S</em> + <em>B</em><em>s</em> = <em>a</em><em>S</em> + <em>B</em><em>S</em></span>
- </p>
-<p><span
-class="math display"><em>B</em><em>s</em> = <em>a</em><em>S</em></span>
- </p>
-<p><span
-class="math display"><em>s</em> = <em>a</em><em>S</em> ÷ <em>B</em></span></p>
+<p><span class="math display">\[BS + Bs = aS + BS\]</span>  </p>
+<p><span class="math display">\[Bs = aS\]</span>  </p>
+<p><span class="math display">\[s = aS \div B\]</span></p>
 <p>Thus the shares to mint are
 <code>( amount * tot_supply ) / vault token balance - amount // since we need to subtract the amount the user has already deposited in the vault</code>,
 as the contract describes.</p>
@@ -360,20 +355,13 @@ total supply.</p>
 <h3 id="withdraw">withdraw</h3>
 <p>Withdrawing first calculates the amount of tokens to send to the user
 with the following equation:</p>
-<p><span
-class="math display">(<em>S</em> − <em>s</em>) ÷ <em>S</em> = (<em>B</em> − <em>a</em>) ÷ <em>B</em></span></p>
+<p><span class="math display">\[( S - s ) \div S = ( B - a ) \div
+B\]</span></p>
 <p>Which we simplify into:</p>
-<p><span
-class="math display"><em>B</em><em>S</em> − <em>B</em><em>s</em> = <em>B</em><em>S</em> − <em>a</em><em>S</em></span>
- </p>
-<p><span
-class="math display">−<em>B</em><em>s</em> = −<em>a</em><em>S</em></span>
- </p>
-<p><span
-class="math display"><em>B</em><em>s</em> = <em>a</em><em>S</em></span>
- </p>
-<p><span
-class="math display"><em>a</em> = <em>B</em><em>s</em> ÷ <em>S</em></span></p>
+<p><span class="math display">\[BS - Bs = BS - aS\]</span>  </p>
+<p><span class="math display">\[- Bs = - aS\]</span>  </p>
+<p><span class="math display">\[Bs = aS\]</span>  </p>
+<p><span class="math display">\[a = Bs \div S\]</span></p>
 <p>Thus <code>(shares * vault token balance) / tot_supply</code>. Then,
 we are calling a <code>burn_shares</code> function, which we can define
 right below the <code>mint_shares</code> function:</p>

@@ -12,15 +12,15 @@ there’s backup peers that need to validate the committed state.</p>
 <p>BFT systems like SBFT decouple commit from execution enabling to
 parallelize and guarantee building N+1 even if N wasn’t executed
 yet.</p>
-<p>Commit needs <span class="math inline">3<em>f</em> + 1</span> while
-execution needs <span class="math inline"><em>f</em> + 1</span> to
-guarantee acknoweldgement around the execution (i.e at least one honest
-node acknowledges the new state).</p>
+<p>Commit needs <span class="math inline">\(3f + 1\)</span> while
+execution needs <span class="math inline">\(f + 1\)</span> to guarantee
+acknoweldgement around the execution (i.e at least one honest node
+acknowledges the new state).</p>
 <p>In a TEE based system the guarantee for liveness is slightly
 different. The system is safe for a certain number of hacked chips <span
-class="math inline"><em>h</em></span> and can be made unavailable for a
-given number of faulty (i.e malicious) operators <span
-class="math inline"><em>f</em></span>.</p>
+class="math inline">\(h\)</span> and can be made unavailable for a given
+number of faulty (i.e malicious) operators <span
+class="math inline">\(f\)</span>.</p>
 <p>The interesting part about applying BFT systems to TEE-based
 applications is that the pre-commit guarantees that hardware gives
 around the execution integrity is much greater than the one a single
@@ -37,21 +37,21 @@ proof to all peers.</li>
 proposed and sign over the new state with their (execution) thershold
 signature and send the certificate to the execution collector.</li>
 <li>Execution collector combines the signatures into an execution proof.
-Note that here the threshold is <span
-class="math inline"><em>f</em> + 1</span> because we just need a honest
-operator (i.e not <span class="math inline"><em>f</em></span>) to
-acknoweldge the new state. The execution collector can now share the new
-state certificate with peers and clients.</li>
+Note that here the threshold is <span class="math inline">\(f+1\)</span>
+because we just need a honest operator (i.e not <span
+class="math inline">\(f\)</span>) to acknoweldge the new state. The
+execution collector can now share the new state certificate with peers
+and clients.</li>
 </ol>
 <p>Here the client gets a response for their request in the last step
 but at step 4 client requests are already committed and are generally
 expected to be shortly collected by execution collectors unless network
 conditions changed.</p>
 <p>This means that until our requests get some level of confirmation we
-still need to await <span class="math inline">3<em>f</em> + 1</span>
-peers to share their share of the signature. Network slots thus need to
-match a consensus round and before that there’s no guarantees regarding
-the request the client sends.</p>
+still need to await <span class="math inline">\(3f+1\)</span> peers to
+share their share of the signature. Network slots thus need to match a
+consensus round and before that there’s no guarantees regarding the
+request the client sends.</p>
 <p>In a TEE system however, we don’t need the slots to match a consensus
 round, specifically we don’t need the requests to be combined into a
 block for them to have some level of integrity guarantees. With this in

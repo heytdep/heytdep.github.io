@@ -278,23 +278,18 @@ trusted domain they trust according to the policy they use (if you’re
 familiar with dstack, this pretty much works the same way).</p>
 <p>Once the communication channel is established, the message passing is
 quite simple and is fully based on asymmetric encryption. Assuming the
-guest TD <span
-class="math inline"><em>T</em><em>D</em><sub><em>g</em></sub></span>
-wants to use <code>TPM_INSTRUCTION</code>:</p>
+guest TD <span class="math inline">\(TD_g\)</span> wants to use
+<code>TPM_INSTRUCTION</code>:</p>
 <ol type="1">
-<li><span
-class="math inline"><em>T</em><em>D</em><sub><em>g</em></sub></span>
-encrypts <code>TPM_INSTRUCTION</code> and stores on a shared
-buffer.</li>
-<li><span
-class="math inline"><em>T</em><em>D</em><sub><em>g</em></sub></span>
-notifies the VMM they’ve sent the instruction.</li>
+<li><span class="math inline">\(TD_g\)</span> encrypts
+<code>TPM_INSTRUCTION</code> and stores on a shared buffer.</li>
+<li><span class="math inline">\(TD_g\)</span> notifies the VMM they’ve
+sent the instruction.</li>
 <li>VMM copies the command over to the buffer it shares with the vTPM
 and notifies the vTPM that it has received an instruciton.</li>
 <li>vTPM TD decrypts the instruction and processes it, returning the
-result to <span
-class="math inline"><em>T</em><em>D</em><sub><em>g</em></sub></span> in
-the same way.</li>
+result to <span class="math inline">\(TD_g\)</span> in the same
+way.</li>
 </ol>
 <h3 id="tpm-vs-vtpm-attestation-on-td">TPM vs vTPM Attestation (on
 TD)</h3>

@@ -56,27 +56,26 @@ and the hash of the transaction set:</p>
 <span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> retList<span class="op">;</span></span>
 <span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
 <p>What this actually means is that ordering <span
-class="math inline"><em>n</em></span> transactions within the same batch
-is cryptographically hard: to order <span
-class="math inline"><em>n</em></span> transactions after transaction
-<span class="math inline"><em>i</em></span> means we need to find a a
-sorter</p>
-<p><span
-class="math display"><em>s</em><em>o</em><em>r</em><em>t</em><em>K</em><em>e</em><em>y</em>( <em>t</em><em>x</em> ) = <em>H</em>( <em>t</em><em>x</em><em>s</em><em>e</em><em>t</em> || <em>t</em><em>x</em><em>i</em><em>d</em>)</span></p>
+class="math inline">\(n\)</span> transactions within the same batch is
+cryptographically hard: to order <span class="math inline">\(n\)</span>
+transactions after transaction <span class="math inline">\(i\)</span>
+means we need to find a a sorter</p>
+<p><span class="math display">\[sortKey( \ tx \ ) = H( \ txset \ || \
+txid)\]</span></p>
 <p>so that:</p>
-<p><span
-class="math display"><em>s</em><em>o</em><em>r</em><em>t</em><em>K</em><em>e</em><em>y</em>( <em>t</em><em>x</em><sub><em>i</em></sub> ) &lt; .. &lt; <em>s</em><em>o</em><em>r</em><em>t</em><em>K</em><em>e</em><em>y</em>( <em>t</em><em>x</em><sub><em>i</em> + <em>n</em></sub> )</span></p>
+<p><span class="math display">\[sortKey( \ tx_{i} \ ) &lt; .. &lt;
+sortKey( \ tx_{i+n} \ )\]</span></p>
 <p>That makes it so the chance of getting those <span
-class="math inline"><em>n</em></span> transactions ordered is <span
-class="math inline"><em>P</em> = 1/(<em>n</em>!)</span>.</p>
-<p><em>If</em> <span class="math inline"><em>n</em></span> is a small
-number, then we have a pretty decent chance of this happening (e.g if
-<span class="math inline"><em>n</em> = 2</span> or <span
-class="math inline"><em>n</em> = 3</span>). Even if we can carry
-sandwich attacks out of a probabilitic vector, the chances are pretty
-slim (<span class="math inline"><em>P</em> = 1/6</span>). Simply
-monitoring the mempool and frontrunning a transaction out of probability
-is a much simpler and functional approach and something <a
+class="math inline">\(n\)</span> transactions ordered is <span
+class="math inline">\(P = 1/(n!)\)</span>.</p>
+<p><em>If</em> <span class="math inline">\(n\)</span> is a small number,
+then we have a pretty decent chance of this happening (e.g if <span
+class="math inline">\(n=2\)</span> or <span
+class="math inline">\(n=3\)</span>). Even if we can carry sandwich
+attacks out of a probabilitic vector, the chances are pretty slim (<span
+class="math inline">\(P = 1/6\)</span>). Simply monitoring the mempool
+and frontrunning a transaction out of probability is a much simpler and
+functional approach and something <a
 href="https://x.com/heytdep/status/1851245346728616054">I actually
 experimented with</a>.</p>
 <p>In any case, probabilitic optimal transaction ordering is a really
@@ -84,23 +83,22 @@ fair compromise, probably the fairest, and that’s why there is no
 evidence of sandwich attacks happening on the Stellar network. However,
 what if we didn’t want to take any chances and wanted to make sure that
 the condition:</p>
-<p><span
-class="math display"><em>s</em><em>o</em><em>r</em><em>t</em><em>K</em><em>e</em><em>y</em>( <em>t</em><em>x</em><sub>1</sub> ) &lt; <em>s</em><em>o</em><em>r</em><em>t</em><em>K</em><em>e</em><em>y</em>( <em>t</em><em>x</em><sub>2</sub> ) &lt; <em>s</em><em>o</em><em>r</em><em>t</em><em>K</em><em>e</em><em>y</em>( <em>t</em><em>x</em><sub>3</sub> )</span></p>
+<p><span class="math display">\[sortKey( \ tx_1 \ ) &lt; sortKey( \ tx_2
+\ ) &lt; sortKey( \ tx_3 \ )\]</span></p>
 <p>always holds effectively sandwiching a target transaction <span
-class="math inline"><em>t</em><em>x</em><sub>2</sub></span>?</p>
+class="math inline">\(tx_2\)</span>?</p>
 <p>Well, even if we cannot invert the hash funciton, turns out it’s not
 that much complex in theory since to order <span
-class="math inline"><em>n</em></span> transactions we need about
-(approximation) <span class="math inline"><em>n</em>!</span> attempts at
+class="math inline">\(n\)</span> transactions we need about
+(approximation) <span class="math inline">\(n!\)</span> attempts at
 variating the txset to obtain the target permutation.</p>
 <p>Not bad! I think? Generally when talking about MeV clients,
 transactions are bundled for optimal extraction i.e we need to bundle
 more than three transactions; and I think we all know how the <span
-class="math inline"><em>y</em> = <em>x</em>!</span> chart looks like.
-That said, if I was a validator that wanted to sandwich a single
-transaction <span
-class="math inline"><em>T</em><em>X</em><sub><em>t</em></sub></span> it
-is theoretically pretty feasible.</p>
+class="math inline">\(y = x!\)</span> chart looks like. That said, if I
+was a validator that wanted to sandwich a single transaction <span
+class="math inline">\(TX_t\)</span> it is theoretically pretty
+feasible.</p>
 <p>However, …</p>
 <h2 id="highest-hash-order">Highest Hash Order</h2>
 <p>Without diving into the details of how SCP nomination works (that’s
@@ -235,8 +233,8 @@ tie-break:</li>
 <p>The code shows us that we either replace or not the currently highest
 transaction set pseudo-randomly (we still need to be deterministic!) by
 XORing the two hashes over <code>x</code>, effectively:</p>
-<p><span
-class="math display"><em>R</em> = (<em>l</em><em>h</em> ⊕ <em>s</em>) &lt; (<em>r</em><em>h</em> ⊕ <em>s</em>)</span></p>
+<p><span class="math display">\[R = (lh \oplus s ) &lt; (rh \oplus s
+)\]</span></p>
 <p>Where, if you paid attention, <code>s</code> is
 <code>candidatesHash</code> within <code>combineCandidates</code> which
 is the hash of incrementally XORing of all the candidate values:</p>

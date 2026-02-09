@@ -194,7 +194,7 @@ represent a number:</p>
 aggregated starting from the verifying key’s <code>gamma_abc</code>.</p>
 <p>So I can build the key and then the <code>prepare_inputs()</code>
 aggregates the public inputs to <span
-class="math inline"><em>L̄</em></span> for me.</p>
+class="math inline">\(\bar{L}\)</span> for me.</p>
 <p>The verifying key is made up of <code>Fp384</code> types, which we
 can construct like this:</p>
 <pre><code>    let numm: Fp384&lt;FqParameters&gt; = Fp384::from_random_bytes(&amp;1u8.to_ne_bytes()).unwrap();</code></pre>
@@ -213,9 +213,8 @@ the <code>Fp384</code> numbers:</p>
 <h2 id="final-verifying-key-approach">Final verifying key approach</h2>
 <p>So this might be the final approach:</p>
 <ol>
-<li><p>get <span
-class="math inline"><em>α</em> <em>β</em> <em>γ</em> <em>δ</em> <em>γ</em><sub><em>a</em><em>b</em><em>c</em></sub></span>
- as bytes.</p></li>
+<li><p>get <span class="math inline">\(\alpha \ \beta \ \gamma \ \delta
+\ \gamma_{abc}\)</span>  as bytes.</p></li>
 <li><p>build the Affine for those</p></li>
 <li><p>use the <code>G1Affine</code> and <code>G2Affine</code> to build
 the verifying key.</p></li>
@@ -934,10 +933,9 @@ we’re ready to go verifying an actual zk-SNARK.</p>
 <h2 id="section">0</h2>
 <p>this is the first test, which again involves verifying an
 ark-generated proof, this is the verifying key ( <span
-class="math inline"><em>α</em>, <em>β</em>, <em>γ</em>, <em>δ</em></span>
-+++++ <span
-class="math inline"><em>γ</em><sub><em>a</em><em>b</em><em>c</em></sub></span>
-) for <code>gamma_abc</code>, the proof (a, b, c), and the image.</p>
+class="math inline">\(\alpha, \ \beta, \ \gamma, \ \delta\)</span> +++++
+<span class="math inline">\(\gamma_{abc}\)</span> ) for
+<code>gamma_abc</code>, the proof (a, b, c), and the image.</p>
 <pre><code>GroupAffine(x=Fp384 &quot;(019658A8FE2530371B8B69DDA1EB401D38ADE94CA012341DA661A988219CDEA79CEE092B535FF84E71C2A9A18957B881)&quot;, y=Fp384 &quot;(0069110BB0B7540F07D4AA367B6BD0C0DD3F8ADE8BF61CE5BFB718D3A64F7A13D425CC898EA11DCF59A065EEEDF0BB80)&quot;)
 
 

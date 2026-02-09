@@ -38,8 +38,8 @@ batched and forwarded to the backup peers.</li>
 mutates state which isn’t the slot finalization from the leader. When
 receiving the slot they’ll execute the actions mutating their internal
 state.</li>
-<li>Every <span class="math inline"><em>n</em></span> slot finalizations
-the leader will also publish a checkpoint, which contains a copy of the
+<li>Every <span class="math inline">\(n\)</span> slot finalizations the
+leader will also publish a checkpoint, which contains a copy of the
 internal state’s critical elements (finalized inventories). Checkpoints
 are mapped to their hash, and are encrypted to key shards that are
 encrypted to the council’s members.</li>
@@ -58,7 +58,7 @@ can become the leader box again by submitting proof that they’re running
 tplus software and that their internal state matches the one of a
 checkpoint. The L1 smart contract might also carry some checks over the
 checkpoint’s endorsement (e.g is it endorsed by at least <span
-class="math inline"><em>n</em></span> TEEs?).</p>
+class="math inline">\(n\)</span> TEEs?).</p>
 <h2 id="vertical-architecture">Vertical Architecture</h2>
 <p>Tplus’ architecture is heavily modular and as a result there’s some
 peers that execute different software than others and have different

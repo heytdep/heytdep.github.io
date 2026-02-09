@@ -31,7 +31,7 @@ result of a function that is executed on secure hardware and where the
 function’s inputs are verifiably derived from committee-validated
 state.</p>
 <h2 id="actors-and-interfaces">Actors and Interfaces</h2>
-<p>I describe a protocol <span class="math inline"><em>Π</em></span>
+<p>I describe a protocol <span class="math inline">\(\Pi\)</span>
 composed of the following participants:</p>
 <ul>
 <li><strong>TEE executors</strong>. The workload lives here; they
@@ -45,8 +45,8 @@ public key for keys the executor requests.</li>
 degrades liveness but increase networking performance by receiving
 signatures from nodes and aggregating them until a threshold is met and
 then forwards the aggregated signature <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>
-+ signers set to the executors.</li>
+class="math inline">\(\sigma_{agg}\)</span> + signers set to the
+executors.</li>
 <li><strong>Observers</strong>. Users/application operatorse/etc can
 query the executor; the executor’s TEE-attested signature lets them
 detect if data didn’t come from the trusted path.</li>
@@ -88,13 +88,13 @@ the workflow while state requests follow from there.</p>
 need to be forwarded and broadcast it to the collector(s).</li>
 <li>Collector: Aggregates node signatures until threshold.</li>
 <li>Delivery:** Collector sends <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>
-+ signers + meta to the subscribed executor(s).</li>
+class="math inline">\(\sigma_{agg}\)</span> + signers + meta to the
+subscribed executor(s).</li>
 <li>Executor: Verifies ledger meta/event by verifying <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>.
-→ If valid the executor starts the data workflow, in retroshades it
-would start by requesting the state and performing the smart contract
-execution (see the next section).</li>
+class="math inline">\(\sigma_{agg}\)</span>. → If valid the executor
+starts the data workflow, in retroshades it would start by requesting
+the state and performing the smart contract execution (see the next
+section).</li>
 </ol>
 <p>We don’t have to trust the collector, and we know that the executor
 will trigger the workflow only on data that is signed by the committee,
@@ -110,27 +110,24 @@ state.</p>
 <li><p>Execute on an untrusted snapshot: The executor runs normally
 assuming a snapshot source as optimistically safe, e.g request state on
 a local node or one of the nodes in <span
-class="math inline"><em>Π</em></span> without going through the
-collector. Note the executor treats this snapshot as untrusted. Every
-accessed portion of state is recorded into a state array and cached on
-the executor.</p></li>
+class="math inline">\(\Pi\)</span> without going through the collector.
+Note the executor treats this snapshot as untrusted. Every accessed
+portion of state is recorded into a state array and cached on the
+executor.</p></li>
 <li><p>After the call’s reads/writes are known, the executor asks nodes
 to provide the exact set of entries it touched. The call is routed
 thorugh the executor to the set of nodes the executor trusts as
 committee.</p></li>
 <li><p>Nodes fetch the requested keys from local state and return
-signature <span
-class="math inline"><em>σ</em><sub><em>i</em></sub></span> along with
-the payload (i.e the state array) to the collector.</p></li>
+signature <span class="math inline">\(\sigma_{i}\)</span> along with the
+payload (i.e the state array) to the collector.</p></li>
 <li><p>Similarly to the event-driven approach the collector aggregates
-signatures into <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>
-for that state array until threshold is reached.</p></li>
-<li><p>Collector sends <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>
+signatures into <span class="math inline">\(\sigma_{agg}\)</span> for
+that state array until threshold is reached.</p></li>
+<li><p>Collector sends <span class="math inline">\(\sigma_{agg}\)</span>
 + signers + states to the executor.</p></li>
 <li><p>The executor verifies <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>:</p>
+class="math inline">\(\sigma_{agg}\)</span>:</p>
 <ul>
 <li>If valid: the executor finalizes and clears the trusted state array
 in its cache.</li>
@@ -146,38 +143,36 @@ finalize a mutation after the state it relied on has committee-validated
 signatures. Because execution is inside a TEE, validity of the
 computation follows from validity of inputs; any mutation with invalid
 inputs is easily detectable thanks to <span
-class="math inline"><em>σ</em><sub><em>a</em><em>g</em><em>g</em></sub></span>.</p>
+class="math inline">\(\sigma_{agg}\)</span>.</p>
 <h2 id="why-collectors">Why collectors</h2>
 <p>Collectors are not crucial to the functioning of <span
-class="math inline"><em>Π</em></span>, which could potentially be run
-only between all executors and all blockchain nodes, rather they act as
+class="math inline">\(\Pi\)</span>, which could potentially be run only
+between all executors and all blockchain nodes, rather they act as
 helpers to concentrate messages and achieve linear communication given
 that nodes push the signatures and data to a collector which returns one
 aggregated package to the executor.</p>
-<p>This avoids <span
-class="math inline"><em>O</em>(<em>n</em><sup>2</sup>)</span> networking
+<p>This avoids <span class="math inline">\(O(n^2)\)</span> networking
 when broadcasting chain events.</p>
 <p>Note that since in the current design chain state is on a per request
 basis for each collector the nodes don’t have to broadcast the state +
-<span class="math inline"><em>σ</em><sub><em>i</em></sub></span> rather
-simply share them to the executor so networking doesn’t really get more
-efficient for state requests unless we switch over to a non-request
-based approach (which might make sense in high state contention
-scenarios).</p>
+<span class="math inline">\(\sigma_{i}\)</span> rather simply share them
+to the executor so networking doesn’t really get more efficient for
+state requests unless we switch over to a non-request based approach
+(which might make sense in high state contention scenarios).</p>
 <p>That said, having the executor in not only to reduce networking
 impact when broadcasting chain events. Collectors are the core of
-liveness within <span class="math inline"><em>Π</em></span> and are
+liveness within <span class="math inline">\(\Pi\)</span> and are
 completely trustless for safety which means they don’t have to run in
 trusted enclaves and are thus much faster to spin up and mostly upgrade
 if needed compared to executors. They can also concentrate bandwidth to
 lower requirements on the other participants in <span
-class="math inline"><em>Π</em></span>.</p>
+class="math inline">\(\Pi\)</span>.</p>
 <h2 id="partial-synchrony-requirements">(Partial) synchrony
 requirements</h2>
 <p>Note that the system does not aim to serve stale states and doesn’t
 want to introduce such requirement for nodes. As such, we assume the
 environment is partially synchronous where the time upper bound <span
-class="math inline"><em>Δ</em></span> for communication fits inside a
+class="math inline">\(\Delta\)</span> for communication fits inside a
 slot execution window.</p>
 <p>Under this assumption, the collector can regularly hit threshold fast
 enough, and the executor can keep pace with slot/ledger closes.</p>
@@ -189,16 +184,16 @@ chain’s slot numbers and from then users can lookup those specific slots
 to make sure integrity keeps up. Note that a one-time verification is
 enough thanks to the integrity guarantees on the execution level.</p>
 <p>It’s also worth noting that when <span
-class="math inline"><em>Π</em></span> falls out of sync with the network
-it is going to be because of networking issues on the collector assuming
+class="math inline">\(\Pi\)</span> falls out of sync with the network it
+is going to be because of networking issues on the collector assuming
 the threshold within the nodes’ committee remains live. Collectors are
 lightweight and simple to replace and introduce within <span
-class="math inline"><em>Π</em></span> so this concern is alleviated.</p>
+class="math inline">\(\Pi\)</span> so this concern is alleviated.</p>
 <h2 id="light-clients-for-networks-without-inclusion-proofs">Light
 Clients for Networks Without Inclusion Proofs?</h2>
 <p>If you’re familiar with how light clients work, you might have found
 similarities between them and part of <span
-class="math inline"><em>Π</em></span>: the executor doesn’t reconstruct
+class="math inline">\(\Pi\)</span>: the executor doesn’t reconstruct
 global state; it simply pulls from other nodes and verifies a subset of
 data with committee attestations. This approach is similar to how light
 clients operate: an elected committee on the beacon chain first signs
@@ -206,17 +201,17 @@ over their state root and then execution clients can verify their
 state’s inclusion within the state root that reached consensus threshold
 among the committee.</p>
 <p>However, there’s a clear difference between this mechanism and <span
-class="math inline"><em>Π</em></span>: many networks can’t provide
+class="math inline">\(\Pi\)</span>: many networks can’t provide
 inclusion proofs simply because their storage layout isn’t designed for
 that purpose.</p>
-<p>In fact, within <span class="math inline"><em>Π</em></span> we’re not
+<p>In fact, within <span class="math inline">\(\Pi\)</span> we’re not
 reaching consensus on the entire state, rather we reach consensus only
 on the subset of state that the executor asked for. Consensus is
 therefore done as threshold signatures on those entries rather than on
 state roots. This is more tedious and less efficient on all fronts, in
-fact when applicable <span class="math inline"><em>Π</em></span> should
+fact when applicable <span class="math inline">\(\Pi\)</span> should
 adapt its executors to work as light clients since they can skip a big
-portion of <span class="math inline"><em>Π</em></span> while maintaining
+portion of <span class="math inline">\(\Pi\)</span> while maintaining
 and likely increasing safety.</p>
 <p>For chains that don’t support light clients, the mechanisms described
 until now are potentially viable to emulate the behavior of light
@@ -242,7 +237,7 @@ maintain safety.</p>
 Liveness Assumptions and Research Directions</h2>
 <p>Currently the design is not explicitly tuned for high liveness, in
 fact the initial design involves only one collector. I did mention
-however, that <span class="math inline"><em>Π</em></span> is designed so
+however, that <span class="math inline">\(\Pi\)</span> is designed so
 collectors are lightweight in the actual execution and easy to adapt,
 upgrade, insert, remove, etc from the protocol. This already trivially
 allows to increase liveness guarantees almost out of the box.</p>
@@ -272,7 +267,7 @@ easier. Nodes also require continuous maintenance and upgrades, which is
 not be best setup to run within a TEE.</p>
 <h1 id="next-steps">Next Steps</h1>
 <p>I’m personally interested in carrying out an implementation of <span
-class="math inline"><em>Π</em></span> that works on the <a
+class="math inline">\(\Pi\)</span> that works on the <a
 href="https://stellar.org">Stellar</a> network and runs <a
 href="https://mercurydata.app/">retroshades</a> executors.</p>
 <p>The implementation will initially be a proof of concept to

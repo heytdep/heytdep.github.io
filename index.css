@@ -91,6 +91,15 @@ ul {
     list-style: none;
 }
 
+#post ul {
+    list-style: disc;
+    padding-left: 2em;
+}
+
+#post ol {
+    padding-left: 2em;
+}
+
 /* Track */
 ::-webkit-scrollbar-track {
   background: #f1f1f1; 
