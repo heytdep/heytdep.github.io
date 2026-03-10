@@ -1,0 +1,658 @@
+<p><code>19/08/2024</code></p>
+<p>In a <a
+href="https://blog.xycloo.com/blog/blend-bot-with-zephyr-and-smart-accounts">recent
+post</a>, XyclooLabs showed a proof-of-concept for using smart accounts
+for on-chain actions deployed on the cloud, and not only.</p>
+<p>If you want to learn more about smart accounts on stellar and why
+they should be used for on-chain actions and automation I recommend
+reading the paragraphs <em>“What are smart accounts on Stellar?”</em>
+and <em>“Why use smart accounts for cloud on-chain actions?”</em> from
+XyclooLabs’ post.</p>
+<p>The TLDR; is that since smart accounts enable to specify various
+authorization policies given different authorities (eg: signers), then
+we should rely on such policies for:</p>
+<ol type="1">
+<li><p><strong>Cloud on-chain actions</strong>: Deploying on chain
+actions on the cloud can be very advantageous in terms of dev experience
+and efficiency, but you need to trust the cloud operator with your
+secret key. In such situations using a smart account with a special
+authorization policy for a signer that you’re trusting the cloud
+operator with. This allows you to safely administrate your funds even
+though they can be accessed by a cloud bot following a certain set of
+rules.</p></li>
+<li><p><strong>Self-hosted on-chain actions</strong>: While in
+self-hosted on-chain actions you don’t have to trust a 3rd party with
+any secret key, reducing the amount of times your account’s master
+secret key is used and accessed is never a bad practice, especially with
+on-chain real-time actions where the secret key/secret key decoder has
+to be hardcoded in plain text in the program.</p></li>
+</ol>
+<p>Additionally, smart accounts have the advantage of being smart
+contracts themselves allowing to execute actions atomically without
+relying on additional contracts as we will see in this standard proposal
+draft.</p>
+<h1 id="motivation">Motivation</h1>
+<p>The motivation behing this draft is to specify a common behaviour and
+authorization structure among smart wallets that are used for on-chain
+actions. More specifically, this proposal includes:</p>
+<ol type="1">
+<li><p>A rust derive macro tthat can be plugged in in any smart account
+to make it compatible to the standard.</p></li>
+<li><p>A generic implementation of a smart account that enforces this
+standard along with the above macro.</p></li>
+<li><p>A client-side implementation of a bot interacting with the smart
+account.</p></li>
+</ol>
+<h1 id="specification">Specification</h1>
+<p>The specification puts compatibility with any existing smart wallet
+at the center and is split in two parts:</p>
+<ol type="1">
+<li><p>authorizing and verifying allowed actions.</p></li>
+<li><p>multiop function for executing multiple actions
+atomically.</p></li>
+</ol>
+<h2 id="authorizing-actions.">Authorizing actions.</h2>
+<h3 id="the-standard-actions-data-type.">The standard actions data
+type.</h3>
+<p>The standard proposes a type whose name can be macro-secified
+(defaults to <code>StandardAllowedActions</code>) which wraps a series
+of allowed contracts identified by an assignable numeric id and a set of
+allowed actions whose name can also be specified in the macro (defaults
+to <code>StandardAction</code>):</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Note: Name defaults to StandardAllowedActions if not specified</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> #generic_typename_attr <span class="op">{</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    contracts<span class="op">:</span> Map<span class="op">&lt;</span><span class="dt">u32</span><span class="op">,</span> Address<span class="op">&gt;,</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    actions<span class="op">:</span> Map<span class="op">&lt;</span>Symbol<span class="op">,</span> StandardAction<span class="op">&gt;,</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    deploy<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co">// Note: Name defaults to StandardAction if not specified</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> #specific_typename_attr <span class="op">{</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    allowed_contracts<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span><span class="dt">u32</span><span class="op">&gt;,</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    allowed_args<span class="op">:</span> Map<span class="op">&lt;</span><span class="dt">u32</span><span class="op">,</span> <span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;&gt;,</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The rationale behind the <code>StandardAllowedActions</code>
+structure is the following:</p>
+<ol type="1">
+<li><p>deploy can be either turned on or off, but it might be good to
+look into further deploy customization if needed.</p></li>
+<li><p>actions are identified by the invoked function name, and a single
+function name can be allowed for multiple contract addresses, specified
+with the contract’s id in the <code>contracts</code> map.</p></li>
+<li><p>actions can also be authorized depending on the invocation’s
+argument. Allowed arguments at certain indexes are whitelisted within
+the <code>allowed_args</code> field, where the key is the argument index
+and the value is an array of authorized argument values.</p></li>
+</ol>
+<p>Below is the implementation that verifies if the configuration allows
+for a certain context:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> StandardAllowedActions <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> is_allowed(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> env<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> context<span class="op">:</span> Context) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">match</span> context <span class="op">{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>            <span class="pp">Context::</span>CreateContractHostFn(_) <span class="op">=&gt;</span> <span class="kw">self</span><span class="op">.</span>deploy<span class="op">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>            <span class="pp">Context::</span>Contract(contract_ctx) <span class="op">=&gt;</span> <span class="op">{</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>                <span class="kw">let</span> args <span class="op">=</span> contract_ctx<span class="op">.</span>args<span class="op">;</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>                <span class="kw">let</span> contract <span class="op">=</span> contract_ctx<span class="op">.</span>contract<span class="op">;</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>                <span class="kw">let</span> fname <span class="op">=</span> contract_ctx<span class="op">.</span>fn_name<span class="op">;</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>                <span class="kw">let</span> <span class="kw">mut</span> is_allowed <span class="op">=</span> <span class="cn">false</span><span class="op">;</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>                <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(allowed) <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>actions<span class="op">.</span>get(fname) <span class="op">{</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>                    <span class="cf">for</span> contract_idx <span class="kw">in</span> allowed<span class="op">.</span>allowed_contracts <span class="op">{</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>                        <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(address) <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>contracts<span class="op">.</span>get(contract_idx) <span class="op">{</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>                            <span class="cf">if</span> contract <span class="op">==</span> address <span class="op">{</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>                                <span class="kw">let</span> <span class="kw">mut</span> current_args_approved <span class="op">=</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>                                <span class="cf">for</span> (idx<span class="op">,</span> allowed_args) <span class="kw">in</span> allowed<span class="op">.</span>allowed_args<span class="op">.</span>clone()<span class="op">.</span>into_iter() <span class="op">{</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>                                    <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(current_arg) <span class="op">=</span> args<span class="op">.</span>get(idx) <span class="op">{</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>                                        <span class="cf">if</span> allowed_args<span class="op">.</span>iter()<span class="op">.</span>find(<span class="op">|</span>x<span class="op">|</span> <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">,</span> x<span class="op">.</span>clone()] <span class="op">==</span> <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">,</span> current_arg<span class="op">.</span>clone()])<span class="op">.</span>is_none() <span class="op">{</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>                                            current_args_approved <span class="op">=</span> <span class="cn">false</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>                                        <span class="op">}</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>                                    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>                                        current_args_approved <span class="op">=</span> <span class="cn">false</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>                                    <span class="op">}</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>                                <span class="op">}</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>                                <span class="cf">if</span> current_args_approved <span class="op">{</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>                                    is_allowed <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>                                <span class="op">}</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>                            <span class="op">}</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>                        <span class="op">}</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a>                is_allowed</span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-41"><a href="#cb2-41" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> is_standard_allowed_action(env<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> ctxs<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Context<span class="op">&gt;</span>) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb2-42"><a href="#cb2-42" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> actions<span class="op">:</span> StandardAllowedActions <span class="op">=</span> env<span class="op">.</span>storage()<span class="op">.</span>instance()<span class="op">.</span>get(<span class="op">&amp;</span><span class="pp">symbol_short!</span>(#actions_storage_attr))<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb2-43"><a href="#cb2-43" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> allowed <span class="op">=</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb2-44"><a href="#cb2-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-45"><a href="#cb2-45" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> ctx <span class="kw">in</span> ctxs <span class="op">{</span></span>
+<span id="cb2-46"><a href="#cb2-46" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="op">!</span>actions<span class="op">.</span>is_allowed(env<span class="op">,</span> ctx) <span class="op">{</span></span>
+<span id="cb2-47"><a href="#cb2-47" aria-hidden="true" tabindex="-1"></a>            allowed <span class="op">=</span> <span class="cn">false</span></span>
+<span id="cb2-48"><a href="#cb2-48" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb2-49"><a href="#cb2-49" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-50"><a href="#cb2-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-51"><a href="#cb2-51" aria-hidden="true" tabindex="-1"></a>    allowed</span>
+<span id="cb2-52"><a href="#cb2-52" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 id="setting-the-allowed-actions">Setting the allowed actions</h3>
+<p>The proposed macro also implements a contract function to set the
+allowed actions:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> #struct_name <span class="op">{</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">/// Set the contract&#39;s allowed on-chain actions.</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> #actions_fname_attr(env<span class="op">:</span> Env<span class="op">,</span> actions<span class="op">:</span> StandardAllowedActions) <span class="op">{</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>current_contract_address()<span class="op">.</span>require_auth()<span class="op">;</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>storage()<span class="op">.</span>instance()<span class="op">.</span>set(<span class="op">&amp;</span><span class="pp">symbol_short!</span>(#actions_storage_attr)<span class="op">,</span> <span class="op">&amp;</span>actions)<span class="op">;</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="co">// ...</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h2 id="multi-op-invocation">Multi-op Invocation</h2>
+<p>As mentioned in the beginning, an advantage of using smart accounts
+for on-chain automated actions is leveraging it to perform multiple
+operations atomically. For example, say that you need to perform an
+automated arb trading action:</p>
+<ol type="1">
+<li><p>Buy token A from dex 1.</p></li>
+<li><p>Sell token A in dex 2.</p></li>
+</ol>
+<p>In order to perform the swap atomically you’d need a separate smart
+contract that bundles the two operations. Instead, the proposed macro
+adds a new function (defaults to <code>saa_invoke</code> as in smart
+account action invoke) that bundles arbitrary contract calls in a single
+transaction:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> #struct_name <span class="op">{</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> #invoke_fname_attr(env<span class="op">:</span> Env<span class="op">,</span> actions<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>(Address<span class="op">,</span> Symbol<span class="op">,</span> <span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;</span>)<span class="op">&gt;</span>) <span class="op">{</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>current_contract_address()<span class="op">.</span>require_auth()<span class="op">;</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> action <span class="kw">in</span> actions <span class="op">{</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> contract <span class="op">=</span> action<span class="op">.</span><span class="dv">0</span><span class="op">;</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> fname <span class="op">=</span> action<span class="op">.</span><span class="dv">1</span><span class="op">;</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> args <span class="op">=</span> action<span class="op">.</span><span class="dv">2</span><span class="op">;</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> _<span class="op">:</span> Val <span class="op">=</span> env<span class="op">.</span>invoke_contract(<span class="op">&amp;</span>contract<span class="op">,</span> <span class="op">&amp;</span>fname<span class="op">,</span> args)<span class="op">;</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>        ()</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr/>
+<h1 id="implementation-on-a-generic-smart-account">Implementation on a
+Generic Smart Account</h1>
+<p>Implementing the macro is simple, but for the sake of compatibility
+there is some behaviour that needs to be defined by the
+implementation:</p>
+<ol type="1">
+<li><p><strong>Authentication</strong>: the implementer must implement
+the logic to add and identify the “special” signer.</p></li>
+<li><p><strong>Macro attributes</strong>: to counter a potential
+types/functions naming collisions with the existing implementation the
+macro accepts a series of optional parameters to change the
+names:</p></li>
+</ol>
+<pre><code>attributes(
+    actions_fname,
+    invoke_fname,
+    generic_typename,
+    specific_typename,
+    actions_storage,
+)</code></pre>
+<h2 id="example">Example</h2>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="at">#![</span>no_std<span class="at">]</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">extension_macro::</span>StandardActions<span class="op">;</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_sdk::</span><span class="op">{</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    <span class="pp">auth::</span><span class="op">{</span>Context<span class="op">,</span> CustomAccountInterface<span class="op">},</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    contract<span class="op">,</span> contracterror<span class="op">,</span> contractimpl<span class="op">,</span> contracttype<span class="op">,</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    <span class="pp">crypto::</span><span class="bu">Hash</span><span class="op">,</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    symbol_short<span class="op">,</span> vec<span class="op">,</span> Address<span class="op">,</span> BytesN<span class="op">,</span> Env<span class="op">,</span> Map<span class="op">,</span> Symbol<span class="op">,</span> Val<span class="op">,</span> <span class="dt">Vec</span><span class="op">,</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contract<span class="at">]</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>derive<span class="at">(</span>StandardActions<span class="at">)]</span></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> AccountContract<span class="op">;</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>derive<span class="at">(</span><span class="bu">Clone</span><span class="at">)]</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> Signature <span class="op">{</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> public_key<span class="op">:</span> BytesN<span class="op">&lt;</span><span class="dv">32</span><span class="op">&gt;,</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> signature<span class="op">:</span> BytesN<span class="op">&lt;</span><span class="dv">64</span><span class="op">&gt;,</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>derive<span class="at">(</span><span class="bu">Clone</span><span class="at">)]</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a><span class="kw">enum</span> DataKey <span class="op">{</span></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>    Signer(BytesN<span class="op">&lt;</span><span class="dv">32</span><span class="op">&gt;</span>)<span class="op">,</span></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracterror<span class="at">]</span></span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>derive<span class="at">(</span><span class="bu">Copy</span><span class="op">,</span> <span class="bu">Clone</span><span class="op">,</span> <span class="bu">Debug</span><span class="op">,</span> <span class="bu">Eq</span><span class="op">,</span> <span class="bu">PartialEq</span><span class="op">,</span> <span class="bu">PartialOrd</span><span class="op">,</span> <span class="bu">Ord</span><span class="at">)]</span></span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>repr<span class="at">(</span><span class="dt">u32</span><span class="at">)]</span></span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> AccError <span class="op">{</span></span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a>    UnknownSigner <span class="op">=</span> <span class="dv">1</span><span class="op">,</span></span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>    InvalidContext <span class="op">=</span> <span class="dv">2</span><span class="op">,</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> AccountContract <span class="op">{</span></span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Add other init params here.</span></span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> init(env<span class="op">:</span> Env<span class="op">,</span> master_signer<span class="op">:</span> BytesN<span class="op">&lt;</span><span class="dv">32</span><span class="op">&gt;,</span> standard_signer<span class="op">:</span> BytesN<span class="op">&lt;</span><span class="dv">32</span><span class="op">&gt;</span>) <span class="op">{</span></span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>storage()</span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>instance()</span>
+<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>set(<span class="op">&amp;</span><span class="pp">DataKey::</span>Signer(master_signer)<span class="op">,</span> <span class="op">&amp;</span><span class="cn">true</span>)<span class="op">;</span></span>
+<span id="cb6-43"><a href="#cb6-43" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>storage()</span>
+<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>instance()</span>
+<span id="cb6-45"><a href="#cb6-45" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>set(<span class="op">&amp;</span><span class="pp">DataKey::</span>Signer(standard_signer)<span class="op">,</span> <span class="op">&amp;</span><span class="cn">false</span>)<span class="op">;</span></span>
+<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-47"><a href="#cb6-47" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-48"><a href="#cb6-48" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-49"><a href="#cb6-49" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb6-50"><a href="#cb6-50" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> CustomAccountInterface <span class="cf">for</span> AccountContract <span class="op">{</span></span>
+<span id="cb6-51"><a href="#cb6-51" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> Signature <span class="op">=</span> Signature<span class="op">;</span></span>
+<span id="cb6-52"><a href="#cb6-52" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> Error <span class="op">=</span> AccError<span class="op">;</span></span>
+<span id="cb6-53"><a href="#cb6-53" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-54"><a href="#cb6-54" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>allow<span class="at">(</span>non_snake_case<span class="at">)]</span></span>
+<span id="cb6-55"><a href="#cb6-55" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> __check_auth(</span>
+<span id="cb6-56"><a href="#cb6-56" aria-hidden="true" tabindex="-1"></a>        env<span class="op">:</span> Env<span class="op">,</span></span>
+<span id="cb6-57"><a href="#cb6-57" aria-hidden="true" tabindex="-1"></a>        signature_payload<span class="op">:</span> <span class="bu">Hash</span><span class="op">&lt;</span><span class="dv">32</span><span class="op">&gt;,</span></span>
+<span id="cb6-58"><a href="#cb6-58" aria-hidden="true" tabindex="-1"></a>        signature<span class="op">:</span> Signature<span class="op">,</span></span>
+<span id="cb6-59"><a href="#cb6-59" aria-hidden="true" tabindex="-1"></a>        auth_contexts<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Context<span class="op">&gt;,</span></span>
+<span id="cb6-60"><a href="#cb6-60" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> AccError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb6-61"><a href="#cb6-61" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> is_master <span class="op">=</span> authenticate(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>signature_payload<span class="op">,</span> <span class="op">&amp;</span>signature)<span class="op">?;</span></span>
+<span id="cb6-62"><a href="#cb6-62" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> <span class="kw">mut</span> result <span class="op">=</span> <span class="cn">Err</span>(<span class="pp">AccError::</span>InvalidContext)<span class="op">;</span></span>
+<span id="cb6-63"><a href="#cb6-63" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-64"><a href="#cb6-64" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> is_master <span class="op">{</span></span>
+<span id="cb6-65"><a href="#cb6-65" aria-hidden="true" tabindex="-1"></a>            result <span class="op">=</span> <span class="cn">Ok</span>(())</span>
+<span id="cb6-66"><a href="#cb6-66" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb6-67"><a href="#cb6-67" aria-hidden="true" tabindex="-1"></a>            <span class="cf">if</span> is_standard_allowed_action(<span class="op">&amp;</span>env<span class="op">,</span> auth_contexts) <span class="op">{</span></span>
+<span id="cb6-68"><a href="#cb6-68" aria-hidden="true" tabindex="-1"></a>                result <span class="op">=</span> <span class="cn">Ok</span>(())</span>
+<span id="cb6-69"><a href="#cb6-69" aria-hidden="true" tabindex="-1"></a>            <span class="op">};</span></span>
+<span id="cb6-70"><a href="#cb6-70" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb6-71"><a href="#cb6-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-72"><a href="#cb6-72" aria-hidden="true" tabindex="-1"></a>        result</span>
+<span id="cb6-73"><a href="#cb6-73" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-74"><a href="#cb6-74" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-75"><a href="#cb6-75" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-76"><a href="#cb6-76" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> authenticate(</span>
+<span id="cb6-77"><a href="#cb6-77" aria-hidden="true" tabindex="-1"></a>    env<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span></span>
+<span id="cb6-78"><a href="#cb6-78" aria-hidden="true" tabindex="-1"></a>    signature_payload<span class="op">:</span> <span class="op">&amp;</span><span class="bu">Hash</span><span class="op">&lt;</span><span class="dv">32</span><span class="op">&gt;,</span></span>
+<span id="cb6-79"><a href="#cb6-79" aria-hidden="true" tabindex="-1"></a>    signature<span class="op">:</span> <span class="op">&amp;</span>Signature<span class="op">,</span></span>
+<span id="cb6-80"><a href="#cb6-80" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span><span class="dt">bool</span><span class="op">,</span> AccError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb6-81"><a href="#cb6-81" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> is_master <span class="op">=</span> <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(is_master) <span class="op">=</span> env</span>
+<span id="cb6-82"><a href="#cb6-82" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>storage()</span>
+<span id="cb6-83"><a href="#cb6-83" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>instance()</span>
+<span id="cb6-84"><a href="#cb6-84" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>get(<span class="op">&amp;</span><span class="pp">DataKey::</span>Signer(signature<span class="op">.</span>public_key<span class="op">.</span>clone()))</span>
+<span id="cb6-85"><a href="#cb6-85" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb6-86"><a href="#cb6-86" aria-hidden="true" tabindex="-1"></a>        is_master</span>
+<span id="cb6-87"><a href="#cb6-87" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb6-88"><a href="#cb6-88" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="cn">Err</span>(<span class="pp">AccError::</span>UnknownSigner)<span class="op">;</span></span>
+<span id="cb6-89"><a href="#cb6-89" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb6-90"><a href="#cb6-90" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-91"><a href="#cb6-91" aria-hidden="true" tabindex="-1"></a>    env<span class="op">.</span>crypto()<span class="op">.</span>ed25519_verify(</span>
+<span id="cb6-92"><a href="#cb6-92" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>signature<span class="op">.</span>public_key<span class="op">,</span></span>
+<span id="cb6-93"><a href="#cb6-93" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>signature_payload<span class="op">.</span>clone()<span class="op">.</span>into()<span class="op">,</span></span>
+<span id="cb6-94"><a href="#cb6-94" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>signature<span class="op">.</span>signature<span class="op">,</span></span>
+<span id="cb6-95"><a href="#cb6-95" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb6-96"><a href="#cb6-96" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-97"><a href="#cb6-97" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(is_master)</span>
+<span id="cb6-98"><a href="#cb6-98" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-99"><a href="#cb6-99" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-100"><a href="#cb6-100" aria-hidden="true" tabindex="-1"></a><span class="kw">mod</span> test<span class="op">;</span></span></code></pre></div>
+<h1 id="full-proposed-macro">Full proposed macro</h1>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">proc_macro::</span>TokenStream<span class="op">;</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">proc_macro2::</span>Span<span class="op">;</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">quote::</span>quote<span class="op">;</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">syn::</span><span class="op">{</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">,</span> parse_macro_input<span class="op">,</span> Attribute<span class="op">,</span> DeriveInput<span class="op">,</span> Expr<span class="op">,</span> ExprLit<span class="op">,</span> Ident<span class="op">,</span> Lit</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> get_attribute(attrs<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Attribute<span class="op">&gt;,</span> attr_name<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> default_to<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span>) <span class="op">-&gt;</span> Ident <span class="op">{</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> ident_source <span class="op">=</span> get_attribute_string(attrs<span class="op">,</span> attr_name<span class="op">,</span> default_to)<span class="op">;</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>    <span class="pp">Ident::</span>new(<span class="op">&amp;</span>ident_source<span class="op">,</span> <span class="pp">Span::</span>call_site())</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> get_attribute_string(attrs<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Attribute<span class="op">&gt;,</span> attr_name<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span><span class="op">,</span> default_to<span class="op">:</span> <span class="op">&amp;</span><span class="dt">str</span>) <span class="op">-&gt;</span> <span class="dt">String</span> <span class="op">{</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    attrs</span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>iter()</span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>find_map(<span class="op">|</span>attr<span class="op">|</span> <span class="op">{</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>            <span class="cf">if</span> attr<span class="op">.</span>path()<span class="op">.</span>is_ident(attr_name) <span class="op">{</span></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>                <span class="kw">let</span> value<span class="op">:</span> Expr <span class="op">=</span> attr<span class="op">.</span>parse_args()<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>                <span class="cf">if</span> <span class="kw">let</span> <span class="pp">Expr::</span>Lit(ExprLit <span class="op">{</span> lit<span class="op">,</span> <span class="op">..</span> <span class="op">}</span>) <span class="op">=</span> value <span class="op">{</span></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>                    <span class="cf">if</span> <span class="kw">let</span> <span class="pp">Lit::</span><span class="bu">Str</span>(value) <span class="op">=</span> lit <span class="op">{</span></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>                        <span class="cf">return</span> <span class="cn">Some</span>(value<span class="op">.</span>value())<span class="op">;</span></span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>                        <span class="pp">panic!</span>(<span class="st">&quot;Invalid lit type&quot;</span>)</span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">panic!</span>(<span class="st">&quot;Invalid type&quot;</span>)</span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>                <span class="pp">panic!</span>(<span class="st">&quot;No provided, defaulting to standard&quot;</span>)</span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span>)</span>
+<span id="cb7-32"><a href="#cb7-32" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>unwrap_or(default_to<span class="op">.</span>to_string())</span>
+<span id="cb7-33"><a href="#cb7-33" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb7-34"><a href="#cb7-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-35"><a href="#cb7-35" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>proc_macro_derive<span class="at">(</span></span>
+<span id="cb7-36"><a href="#cb7-36" aria-hidden="true" tabindex="-1"></a>    StandardActions<span class="op">,</span></span>
+<span id="cb7-37"><a href="#cb7-37" aria-hidden="true" tabindex="-1"></a>    attributes<span class="at">(</span></span>
+<span id="cb7-38"><a href="#cb7-38" aria-hidden="true" tabindex="-1"></a>        actions_fname<span class="op">,</span></span>
+<span id="cb7-39"><a href="#cb7-39" aria-hidden="true" tabindex="-1"></a>        invoke_fname<span class="op">,</span></span>
+<span id="cb7-40"><a href="#cb7-40" aria-hidden="true" tabindex="-1"></a>        generic_typename<span class="op">,</span></span>
+<span id="cb7-41"><a href="#cb7-41" aria-hidden="true" tabindex="-1"></a>        specific_typename<span class="op">,</span></span>
+<span id="cb7-42"><a href="#cb7-42" aria-hidden="true" tabindex="-1"></a>        actions_storage<span class="op">,</span></span>
+<span id="cb7-43"><a href="#cb7-43" aria-hidden="true" tabindex="-1"></a>    <span class="at">)</span></span>
+<span id="cb7-44"><a href="#cb7-44" aria-hidden="true" tabindex="-1"></a><span class="at">)]</span></span>
+<span id="cb7-45"><a href="#cb7-45" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> standard_actions_derive(input<span class="op">:</span> TokenStream) <span class="op">-&gt;</span> TokenStream <span class="op">{</span></span>
+<span id="cb7-46"><a href="#cb7-46" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> input <span class="op">=</span> <span class="pp">parse_macro_input!</span>(input <span class="kw">as</span> DeriveInput)<span class="op">;</span></span>
+<span id="cb7-47"><a href="#cb7-47" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> struct_name <span class="op">=</span> <span class="op">&amp;</span>input<span class="op">.</span>ident<span class="op">;</span></span>
+<span id="cb7-48"><a href="#cb7-48" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> actions_fname_attr <span class="op">=</span> get_attribute(</span>
+<span id="cb7-49"><a href="#cb7-49" aria-hidden="true" tabindex="-1"></a>        input<span class="op">.</span>attrs<span class="op">.</span>clone()<span class="op">,</span></span>
+<span id="cb7-50"><a href="#cb7-50" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;actions_fname&quot;</span><span class="op">,</span></span>
+<span id="cb7-51"><a href="#cb7-51" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;set_standard_allowed_actions&quot;</span><span class="op">,</span></span>
+<span id="cb7-52"><a href="#cb7-52" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb7-53"><a href="#cb7-53" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> invoke_fname_attr <span class="op">=</span> get_attribute(input<span class="op">.</span>attrs<span class="op">.</span>clone()<span class="op">,</span> <span class="st">&quot;invoke_fname&quot;</span><span class="op">,</span> <span class="st">&quot;saa_invoke&quot;</span>)<span class="op">;</span></span>
+<span id="cb7-54"><a href="#cb7-54" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> generic_typename_attr <span class="op">=</span> get_attribute(</span>
+<span id="cb7-55"><a href="#cb7-55" aria-hidden="true" tabindex="-1"></a>        input<span class="op">.</span>attrs<span class="op">.</span>clone()<span class="op">,</span></span>
+<span id="cb7-56"><a href="#cb7-56" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;generic_typename&quot;</span><span class="op">,</span></span>
+<span id="cb7-57"><a href="#cb7-57" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;StandardAllowedActions&quot;</span><span class="op">,</span></span>
+<span id="cb7-58"><a href="#cb7-58" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb7-59"><a href="#cb7-59" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> specific_typename_attr <span class="op">=</span></span>
+<span id="cb7-60"><a href="#cb7-60" aria-hidden="true" tabindex="-1"></a>        get_attribute(input<span class="op">.</span>attrs<span class="op">.</span>clone()<span class="op">,</span> <span class="st">&quot;specific_typename&quot;</span><span class="op">,</span> <span class="st">&quot;StandardAction&quot;</span>)<span class="op">;</span></span>
+<span id="cb7-61"><a href="#cb7-61" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> actions_storage_attr <span class="op">=</span> get_attribute_string(input<span class="op">.</span>attrs<span class="op">.</span>clone()<span class="op">,</span> <span class="st">&quot;actions_storage&quot;</span><span class="op">,</span> <span class="st">&quot;SAA&quot;</span>)<span class="op">;</span></span>
+<span id="cb7-62"><a href="#cb7-62" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-63"><a href="#cb7-63" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> expanded <span class="op">=</span> <span class="pp">quote!</span> <span class="op">{</span></span>
+<span id="cb7-64"><a href="#cb7-64" aria-hidden="true" tabindex="-1"></a>        <span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb7-65"><a href="#cb7-65" aria-hidden="true" tabindex="-1"></a>        <span class="kw">pub</span> <span class="kw">struct</span> #generic_typename_attr <span class="op">{</span></span>
+<span id="cb7-66"><a href="#cb7-66" aria-hidden="true" tabindex="-1"></a>            contracts<span class="op">:</span> Map<span class="op">&lt;</span><span class="dt">u32</span><span class="op">,</span> Address<span class="op">&gt;,</span></span>
+<span id="cb7-67"><a href="#cb7-67" aria-hidden="true" tabindex="-1"></a>            actions<span class="op">:</span> Map<span class="op">&lt;</span>Symbol<span class="op">,</span> StandardAction<span class="op">&gt;,</span></span>
+<span id="cb7-68"><a href="#cb7-68" aria-hidden="true" tabindex="-1"></a>            deploy<span class="op">:</span> <span class="dt">bool</span><span class="op">,</span></span>
+<span id="cb7-69"><a href="#cb7-69" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb7-70"><a href="#cb7-70" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-71"><a href="#cb7-71" aria-hidden="true" tabindex="-1"></a>        <span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb7-72"><a href="#cb7-72" aria-hidden="true" tabindex="-1"></a>        <span class="kw">pub</span> <span class="kw">struct</span> #specific_typename_attr <span class="op">{</span></span>
+<span id="cb7-73"><a href="#cb7-73" aria-hidden="true" tabindex="-1"></a>            allowed_contracts<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span><span class="dt">u32</span><span class="op">&gt;,</span></span>
+<span id="cb7-74"><a href="#cb7-74" aria-hidden="true" tabindex="-1"></a>            allowed_args<span class="op">:</span> Map<span class="op">&lt;</span><span class="dt">u32</span><span class="op">,</span> <span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;&gt;,</span></span>
+<span id="cb7-75"><a href="#cb7-75" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb7-76"><a href="#cb7-76" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-77"><a href="#cb7-77" aria-hidden="true" tabindex="-1"></a>        <span class="kw">impl</span> StandardAllowedActions <span class="op">{</span></span>
+<span id="cb7-78"><a href="#cb7-78" aria-hidden="true" tabindex="-1"></a>            <span class="kw">pub</span> <span class="kw">fn</span> is_allowed(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> env<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> context<span class="op">:</span> Context) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb7-79"><a href="#cb7-79" aria-hidden="true" tabindex="-1"></a>                <span class="cf">match</span> context <span class="op">{</span></span>
+<span id="cb7-80"><a href="#cb7-80" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">Context::</span>CreateContractHostFn(_) <span class="op">=&gt;</span> <span class="kw">self</span><span class="op">.</span>deploy<span class="op">,</span></span>
+<span id="cb7-81"><a href="#cb7-81" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">Context::</span>Contract(contract_ctx) <span class="op">=&gt;</span> <span class="op">{</span></span>
+<span id="cb7-82"><a href="#cb7-82" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">let</span> args <span class="op">=</span> contract_ctx<span class="op">.</span>args<span class="op">;</span></span>
+<span id="cb7-83"><a href="#cb7-83" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">let</span> contract <span class="op">=</span> contract_ctx<span class="op">.</span>contract<span class="op">;</span></span>
+<span id="cb7-84"><a href="#cb7-84" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">let</span> fname <span class="op">=</span> contract_ctx<span class="op">.</span>fn_name<span class="op">;</span></span>
+<span id="cb7-85"><a href="#cb7-85" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-86"><a href="#cb7-86" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">let</span> <span class="kw">mut</span> is_allowed <span class="op">=</span> <span class="cn">false</span><span class="op">;</span></span>
+<span id="cb7-87"><a href="#cb7-87" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-88"><a href="#cb7-88" aria-hidden="true" tabindex="-1"></a>                        <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(allowed) <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>actions<span class="op">.</span>get(fname) <span class="op">{</span></span>
+<span id="cb7-89"><a href="#cb7-89" aria-hidden="true" tabindex="-1"></a>                            <span class="cf">for</span> contract_idx <span class="kw">in</span> allowed<span class="op">.</span>allowed_contracts <span class="op">{</span></span>
+<span id="cb7-90"><a href="#cb7-90" aria-hidden="true" tabindex="-1"></a>                                <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(address) <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>contracts<span class="op">.</span>get(contract_idx) <span class="op">{</span></span>
+<span id="cb7-91"><a href="#cb7-91" aria-hidden="true" tabindex="-1"></a>                                    <span class="cf">if</span> contract <span class="op">==</span> address <span class="op">{</span></span>
+<span id="cb7-92"><a href="#cb7-92" aria-hidden="true" tabindex="-1"></a>                                        <span class="kw">let</span> <span class="kw">mut</span> current_args_approved <span class="op">=</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb7-93"><a href="#cb7-93" aria-hidden="true" tabindex="-1"></a>                                        <span class="cf">for</span> (idx<span class="op">,</span> allowed_args) <span class="kw">in</span> allowed<span class="op">.</span>allowed_args<span class="op">.</span>clone()<span class="op">.</span>into_iter() <span class="op">{</span></span>
+<span id="cb7-94"><a href="#cb7-94" aria-hidden="true" tabindex="-1"></a>                                            <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(current_arg) <span class="op">=</span> args<span class="op">.</span>get(idx) <span class="op">{</span></span>
+<span id="cb7-95"><a href="#cb7-95" aria-hidden="true" tabindex="-1"></a>                                                <span class="cf">if</span> allowed_args<span class="op">.</span>iter()<span class="op">.</span>find(<span class="op">|</span>x<span class="op">|</span> <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">,</span> x<span class="op">.</span>clone()] <span class="op">==</span> <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">,</span> current_arg<span class="op">.</span>clone()])<span class="op">.</span>is_none() <span class="op">{</span></span>
+<span id="cb7-96"><a href="#cb7-96" aria-hidden="true" tabindex="-1"></a>                                                    current_args_approved <span class="op">=</span> <span class="cn">false</span></span>
+<span id="cb7-97"><a href="#cb7-97" aria-hidden="true" tabindex="-1"></a>                                                <span class="op">}</span></span>
+<span id="cb7-98"><a href="#cb7-98" aria-hidden="true" tabindex="-1"></a>                                            <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb7-99"><a href="#cb7-99" aria-hidden="true" tabindex="-1"></a>                                                current_args_approved <span class="op">=</span> <span class="cn">false</span></span>
+<span id="cb7-100"><a href="#cb7-100" aria-hidden="true" tabindex="-1"></a>                                            <span class="op">}</span></span>
+<span id="cb7-101"><a href="#cb7-101" aria-hidden="true" tabindex="-1"></a>                                        <span class="op">}</span></span>
+<span id="cb7-102"><a href="#cb7-102" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-103"><a href="#cb7-103" aria-hidden="true" tabindex="-1"></a>                                        <span class="cf">if</span> current_args_approved <span class="op">{</span></span>
+<span id="cb7-104"><a href="#cb7-104" aria-hidden="true" tabindex="-1"></a>                                            is_allowed <span class="op">=</span> <span class="cn">true</span></span>
+<span id="cb7-105"><a href="#cb7-105" aria-hidden="true" tabindex="-1"></a>                                        <span class="op">}</span></span>
+<span id="cb7-106"><a href="#cb7-106" aria-hidden="true" tabindex="-1"></a>                                    <span class="op">}</span></span>
+<span id="cb7-107"><a href="#cb7-107" aria-hidden="true" tabindex="-1"></a>                                <span class="op">}</span></span>
+<span id="cb7-108"><a href="#cb7-108" aria-hidden="true" tabindex="-1"></a>                            <span class="op">}</span></span>
+<span id="cb7-109"><a href="#cb7-109" aria-hidden="true" tabindex="-1"></a>                        <span class="op">}</span></span>
+<span id="cb7-110"><a href="#cb7-110" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-111"><a href="#cb7-111" aria-hidden="true" tabindex="-1"></a>                        is_allowed</span>
+<span id="cb7-112"><a href="#cb7-112" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
+<span id="cb7-113"><a href="#cb7-113" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb7-114"><a href="#cb7-114" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb7-115"><a href="#cb7-115" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb7-116"><a href="#cb7-116" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-117"><a href="#cb7-117" aria-hidden="true" tabindex="-1"></a>        <span class="kw">pub</span> <span class="kw">fn</span> is_standard_allowed_action(env<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> ctxs<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Context<span class="op">&gt;</span>) <span class="op">-&gt;</span> <span class="dt">bool</span> <span class="op">{</span></span>
+<span id="cb7-118"><a href="#cb7-118" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> actions<span class="op">:</span> StandardAllowedActions <span class="op">=</span> env<span class="op">.</span>storage()<span class="op">.</span>instance()<span class="op">.</span>get(<span class="op">&amp;</span><span class="pp">symbol_short!</span>(#actions_storage_attr))<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb7-119"><a href="#cb7-119" aria-hidden="true" tabindex="-1"></a>            <span class="kw">let</span> <span class="kw">mut</span> allowed <span class="op">=</span> <span class="cn">true</span><span class="op">;</span></span>
+<span id="cb7-120"><a href="#cb7-120" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-121"><a href="#cb7-121" aria-hidden="true" tabindex="-1"></a>            <span class="cf">for</span> ctx <span class="kw">in</span> ctxs <span class="op">{</span></span>
+<span id="cb7-122"><a href="#cb7-122" aria-hidden="true" tabindex="-1"></a>                <span class="cf">if</span> <span class="op">!</span>actions<span class="op">.</span>is_allowed(env<span class="op">,</span> ctx) <span class="op">{</span></span>
+<span id="cb7-123"><a href="#cb7-123" aria-hidden="true" tabindex="-1"></a>                    allowed <span class="op">=</span> <span class="cn">false</span></span>
+<span id="cb7-124"><a href="#cb7-124" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb7-125"><a href="#cb7-125" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb7-126"><a href="#cb7-126" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-127"><a href="#cb7-127" aria-hidden="true" tabindex="-1"></a>            allowed</span>
+<span id="cb7-128"><a href="#cb7-128" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb7-129"><a href="#cb7-129" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-130"><a href="#cb7-130" aria-hidden="true" tabindex="-1"></a>        <span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb7-131"><a href="#cb7-131" aria-hidden="true" tabindex="-1"></a>        <span class="kw">impl</span> #struct_name <span class="op">{</span></span>
+<span id="cb7-132"><a href="#cb7-132" aria-hidden="true" tabindex="-1"></a>            <span class="co">/// Set the contract&#39;s allowed on-chain actions.</span></span>
+<span id="cb7-133"><a href="#cb7-133" aria-hidden="true" tabindex="-1"></a>            <span class="kw">pub</span> <span class="kw">fn</span> #actions_fname_attr(env<span class="op">:</span> Env<span class="op">,</span> actions<span class="op">:</span> StandardAllowedActions) <span class="op">{</span></span>
+<span id="cb7-134"><a href="#cb7-134" aria-hidden="true" tabindex="-1"></a>                env<span class="op">.</span>current_contract_address()<span class="op">.</span>require_auth()<span class="op">;</span></span>
+<span id="cb7-135"><a href="#cb7-135" aria-hidden="true" tabindex="-1"></a>                env<span class="op">.</span>storage()<span class="op">.</span>instance()<span class="op">.</span>set(<span class="op">&amp;</span><span class="pp">symbol_short!</span>(#actions_storage_attr)<span class="op">,</span> <span class="op">&amp;</span>actions)<span class="op">;</span></span>
+<span id="cb7-136"><a href="#cb7-136" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb7-137"><a href="#cb7-137" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-138"><a href="#cb7-138" aria-hidden="true" tabindex="-1"></a>            <span class="kw">pub</span> <span class="kw">fn</span> #invoke_fname_attr(env<span class="op">:</span> Env<span class="op">,</span> actions<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>(Address<span class="op">,</span> Symbol<span class="op">,</span> <span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;</span>)<span class="op">&gt;</span>) <span class="op">{</span></span>
+<span id="cb7-139"><a href="#cb7-139" aria-hidden="true" tabindex="-1"></a>                env<span class="op">.</span>current_contract_address()<span class="op">.</span>require_auth()<span class="op">;</span></span>
+<span id="cb7-140"><a href="#cb7-140" aria-hidden="true" tabindex="-1"></a>                <span class="cf">for</span> action <span class="kw">in</span> actions <span class="op">{</span></span>
+<span id="cb7-141"><a href="#cb7-141" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">let</span> contract <span class="op">=</span> action<span class="op">.</span><span class="dv">0</span><span class="op">;</span></span>
+<span id="cb7-142"><a href="#cb7-142" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">let</span> fname <span class="op">=</span> action<span class="op">.</span><span class="dv">1</span><span class="op">;</span></span>
+<span id="cb7-143"><a href="#cb7-143" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">let</span> args <span class="op">=</span> action<span class="op">.</span><span class="dv">2</span><span class="op">;</span></span>
+<span id="cb7-144"><a href="#cb7-144" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-145"><a href="#cb7-145" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">let</span> _<span class="op">:</span> Val <span class="op">=</span> env<span class="op">.</span>invoke_contract(<span class="op">&amp;</span>contract<span class="op">,</span> <span class="op">&amp;</span>fname<span class="op">,</span> args)<span class="op">;</span></span>
+<span id="cb7-146"><a href="#cb7-146" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb7-147"><a href="#cb7-147" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-148"><a href="#cb7-148" aria-hidden="true" tabindex="-1"></a>                ()</span>
+<span id="cb7-149"><a href="#cb7-149" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb7-150"><a href="#cb7-150" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb7-151"><a href="#cb7-151" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb7-152"><a href="#cb7-152" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-153"><a href="#cb7-153" aria-hidden="true" tabindex="-1"></a>    <span class="pp">TokenStream::</span>from(expanded)</span>
+<span id="cb7-154"><a href="#cb7-154" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr/>
+<h1 id="client-side-implementations">Client side implementations</h1>
+<p>An advantage of having a standard for on-chain actions on smart
+accounts is the ease of implementation client-side. For example, we’ve
+added an experimental function to a not-yet released version of the <a
+href="https://docs.rs/zephyr-sdk/latest/zephyr_sdk/">Zephyr Rust SDK</a>
+that allows to seamlessly work with this standard and perform on-chain
+actions:</p>
+<ol type="1">
+<li><p>example contract that implements the standard:
+<code>CCMJ32EN7E4AKK6K6MGKSVRZPER6RWU3RKDM4VS43T2KC365AMLW3MI2</code>.</p></li>
+<li><p><code>saa_invoke</code> transaction example: <a
+href="https://stellar.expert/explorer/testnet/tx/eed981695467cfad107267a1a2de20d81a81266dde998ff58071bac07e0f922d">https://stellar.expert/explorer/testnet/tx/eed981695467cfad107267a1a2de20d81a81266dde998ff58071bac07e0f922d</a>.</p></li>
+<li><p>configuring the authorized actions transaction example: <a
+href="https://stellar.expert/explorer/testnet/tx/a6e0ca3f466b42508ba12f71073b5a4f10e15c4318067f914e2677c738721090">https://stellar.expert/explorer/testnet/tx/a6e0ca3f466b42508ba12f71073b5a4f10e15c4318067f914e2677c738721090</a>.</p></li>
+</ol>
+<h2 id="zephyr-implementation">Zephyr implementation</h2>
+<h3 id="performing-on-chain-actions">Performing on-chain actions</h3>
+<p>This example is on-demand in this case, but can be easily used within
+an automated workflow as the one described in <a
+href="https://blog.xycloo.com/blog/blend-bot-with-zephyr-and-smart-accounts">XyclooLabs’s
+post</a>.</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>no_mangle<span class="at">]</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">extern</span> <span class="st">&quot;C&quot;</span> <span class="kw">fn</span> do_action() <span class="op">{</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> env <span class="op">=</span> <span class="pp">EnvClient::</span>empty()<span class="op">;</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> wallet_address <span class="op">=</span> address_from_str(<span class="op">&amp;</span>env<span class="op">,</span> SMART_ACCOUNT)<span class="op">;</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> ybx_address <span class="op">=</span> address_from_str(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>YBX_CONTRACT)<span class="op">;</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> action<span class="op">:</span> (Address<span class="op">,</span> Symbol<span class="op">,</span> <span class="pp">soroban_sdk::</span><span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;</span>) <span class="op">=</span> <span class="op">{</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> fname <span class="op">=</span> <span class="st">&quot;submit&quot;</span><span class="op">;</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> map<span class="op">:</span> Map<span class="op">&lt;</span>Symbol<span class="op">,</span> Val<span class="op">&gt;</span> <span class="op">=</span> <span class="pp">map!</span>[</span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>            <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>            (</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>                <span class="pp">Symbol::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="st">&quot;request_type&quot;</span>)<span class="op">,</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>                <span class="dv">2_u32</span><span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>            )<span class="op">,</span></span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>            (</span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>                <span class="pp">Symbol::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="st">&quot;address&quot;</span>)<span class="op">,</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>                <span class="pp">Address::</span>from_string(<span class="op">&amp;</span><span class="pp">zephyr_sdk::soroban_sdk::</span><span class="dt">String</span><span class="pp">::</span>from_str(</span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>                    <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>                    <span class="st">&quot;CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC&quot;</span><span class="op">,</span></span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>                ))</span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>                <span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>            )<span class="op">,</span></span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>            (</span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>                <span class="pp">Symbol::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="st">&quot;amount&quot;</span>)<span class="op">,</span></span>
+<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>                <span class="dv">100_000_000_i128</span><span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-27"><a href="#cb8-27" aria-hidden="true" tabindex="-1"></a>            )</span>
+<span id="cb8-28"><a href="#cb8-28" aria-hidden="true" tabindex="-1"></a>        ]<span class="op">;</span></span>
+<span id="cb8-29"><a href="#cb8-29" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb8-30"><a href="#cb8-30" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> args<span class="op">:</span> <span class="pp">soroban_sdk::</span><span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;</span> <span class="op">=</span> <span class="pp">vec!</span>[</span>
+<span id="cb8-31"><a href="#cb8-31" aria-hidden="true" tabindex="-1"></a>            <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb8-32"><a href="#cb8-32" aria-hidden="true" tabindex="-1"></a>            wallet_address<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-33"><a href="#cb8-33" aria-hidden="true" tabindex="-1"></a>            wallet_address<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-34"><a href="#cb8-34" aria-hidden="true" tabindex="-1"></a>            wallet_address<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-35"><a href="#cb8-35" aria-hidden="true" tabindex="-1"></a>            <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> map]<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb8-36"><a href="#cb8-36" aria-hidden="true" tabindex="-1"></a>        ]<span class="op">;</span></span>
+<span id="cb8-37"><a href="#cb8-37" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb8-38"><a href="#cb8-38" aria-hidden="true" tabindex="-1"></a>        (ybx_address<span class="op">,</span> <span class="pp">Symbol::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> fname)<span class="op">,</span> args)</span>
+<span id="cb8-39"><a href="#cb8-39" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb8-40"><a href="#cb8-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-41"><a href="#cb8-41" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> saa_actions<span class="op">:</span> <span class="pp">soroban_sdk::</span><span class="dt">Vec</span><span class="op">&lt;</span>(Address<span class="op">,</span> Symbol<span class="op">,</span> <span class="pp">soroban_sdk::</span><span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;</span>)<span class="op">&gt;</span> <span class="op">=</span> <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> action]<span class="op">;</span></span>
+<span id="cb8-42"><a href="#cb8-42" aria-hidden="true" tabindex="-1"></a>    <span class="co">//let bytes = env.to_scval(saa_actions.clone()).to_xdr_base64(Limits::none()).unwrap();</span></span>
+<span id="cb8-43"><a href="#cb8-43" aria-hidden="true" tabindex="-1"></a>    <span class="co">//env.log().debug(format!(&quot;{:?}&quot;, bytes), None);</span></span>
+<span id="cb8-44"><a href="#cb8-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-45"><a href="#cb8-45" aria-hidden="true" tabindex="-1"></a>    env<span class="op">.</span>log()<span class="op">.</span>debug(<span class="st">&quot;Executing smart account transaction&quot;</span><span class="op">,</span> <span class="cn">None</span>)<span class="op">;</span></span>
+<span id="cb8-46"><a href="#cb8-46" aria-hidden="true" tabindex="-1"></a>    execute_smart_account_transaction(</span>
+<span id="cb8-47"><a href="#cb8-47" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb8-48"><a href="#cb8-48" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>NETWORK<span class="op">,</span></span>
+<span id="cb8-49"><a href="#cb8-49" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;https://horizon-testnet.stellar.org/transactions&quot;</span><span class="op">,</span></span>
+<span id="cb8-50"><a href="#cb8-50" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SOURCE_ACCOUNT<span class="op">,</span></span>
+<span id="cb8-51"><a href="#cb8-51" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SOUCRE_SECRET<span class="op">,</span></span>
+<span id="cb8-52"><a href="#cb8-52" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SMART_ACCOUNT<span class="op">,</span></span>
+<span id="cb8-53"><a href="#cb8-53" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;saa_invoke&quot;</span><span class="op">,</span></span>
+<span id="cb8-54"><a href="#cb8-54" aria-hidden="true" tabindex="-1"></a>        <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> saa_actions<span class="op">.</span>into_val(env<span class="op">.</span>soroban())]<span class="op">,</span></span>
+<span id="cb8-55"><a href="#cb8-55" aria-hidden="true" tabindex="-1"></a>        SIGNATURE_DURATION<span class="op">,</span></span>
+<span id="cb8-56"><a href="#cb8-56" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>MERCURY_SECRET<span class="op">,</span></span>
+<span id="cb8-57"><a href="#cb8-57" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SMART_ACCOUNT<span class="op">,</span></span>
+<span id="cb8-58"><a href="#cb8-58" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SMART_ACCOUNT_HASH<span class="op">,</span></span>
+<span id="cb8-59"><a href="#cb8-59" aria-hidden="true" tabindex="-1"></a>        <span class="cn">false</span><span class="op">,</span></span>
+<span id="cb8-60"><a href="#cb8-60" aria-hidden="true" tabindex="-1"></a>        INSTRUCTIONS_FIX<span class="op">,</span></span>
+<span id="cb8-61"><a href="#cb8-61" aria-hidden="true" tabindex="-1"></a>        WRITE_BYTES_FIX<span class="op">,</span></span>
+<span id="cb8-62"><a href="#cb8-62" aria-hidden="true" tabindex="-1"></a>        READ_BYTES_FIX<span class="op">,</span></span>
+<span id="cb8-63"><a href="#cb8-63" aria-hidden="true" tabindex="-1"></a>        RESOURCE_FEE_FIX<span class="op">,</span></span>
+<span id="cb8-64"><a href="#cb8-64" aria-hidden="true" tabindex="-1"></a>        FEE_FIX<span class="op">,</span></span>
+<span id="cb8-65"><a href="#cb8-65" aria-hidden="true" tabindex="-1"></a>        build_sig</span>
+<span id="cb8-66"><a href="#cb8-66" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb8-67"><a href="#cb8-67" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-68"><a href="#cb8-68" aria-hidden="true" tabindex="-1"></a>    env<span class="op">.</span>conclude(<span class="st">&quot;Successfully sent transaction&quot;</span>)</span>
+<span id="cb8-69"><a href="#cb8-69" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 id="setting-allowed-actions">Setting allowed actions</h3>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>no_mangle<span class="at">]</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">extern</span> <span class="st">&quot;C&quot;</span> <span class="kw">fn</span> set_actions() <span class="op">{</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> env <span class="op">=</span> <span class="pp">EnvClient::</span>empty()<span class="op">;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> fname <span class="op">=</span> <span class="st">&quot;set_standard_allowed_actions&quot;</span><span class="op">;</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> wallet_address <span class="op">=</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>        <span class="pp">Address::</span>from_string(<span class="op">&amp;</span><span class="pp">SorobanString::</span>from_str(<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="op">&amp;</span>SMART_ACCOUNT))<span class="op">;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> allowed_contracts <span class="op">=</span> <span class="pp">Map::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban())<span class="op">;</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>    allowed_contracts<span class="op">.</span>set(</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>        <span class="dv">1_u32</span><span class="op">,</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>        <span class="pp">Address::</span>from_string(<span class="op">&amp;</span><span class="pp">SorobanString::</span>from_str(<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="op">&amp;</span>YBX_CONTRACT))<span class="op">,</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    allowed_contracts<span class="op">.</span>set(<span class="dv">2_u32</span><span class="op">,</span> wallet_address<span class="op">.</span>clone())<span class="op">;</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>    allowed_contracts<span class="op">.</span>set(<span class="dv">3_u32</span><span class="op">,</span> address_from_str(<span class="op">&amp;</span>env<span class="op">,</span> <span class="st">&quot;CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC&quot;</span>))<span class="op">;</span></span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> allowed_actions <span class="op">=</span> <span class="pp">Map::</span>new(env<span class="op">.</span>soroban())<span class="op">;</span></span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>    add_allowed_action(</span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">mut</span> allowed_actions<span class="op">,</span></span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;submit&quot;</span><span class="op">,</span></span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>        <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="dv">1_u32</span>]<span class="op">,</span></span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>        <span class="pp">Map::</span><span class="op">&lt;</span><span class="dt">u32</span><span class="op">,</span> <span class="pp">soroban_sdk::</span><span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;&gt;</span><span class="pp">::</span>from_array(</span>
+<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>            <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a>            [</span>
+<span id="cb9-26"><a href="#cb9-26" aria-hidden="true" tabindex="-1"></a>                (</span>
+<span id="cb9-27"><a href="#cb9-27" aria-hidden="true" tabindex="-1"></a>                    <span class="dv">0_u32</span><span class="op">,</span></span>
+<span id="cb9-28"><a href="#cb9-28" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">vec!</span>[</span>
+<span id="cb9-29"><a href="#cb9-29" aria-hidden="true" tabindex="-1"></a>                        <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb9-30"><a href="#cb9-30" aria-hidden="true" tabindex="-1"></a>                        wallet_address<span class="op">.</span>clone()<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb9-31"><a href="#cb9-31" aria-hidden="true" tabindex="-1"></a>                    ]<span class="op">,</span></span>
+<span id="cb9-32"><a href="#cb9-32" aria-hidden="true" tabindex="-1"></a>                )<span class="op">,</span></span>
+<span id="cb9-33"><a href="#cb9-33" aria-hidden="true" tabindex="-1"></a>                (</span>
+<span id="cb9-34"><a href="#cb9-34" aria-hidden="true" tabindex="-1"></a>                    <span class="dv">1_u32</span><span class="op">,</span></span>
+<span id="cb9-35"><a href="#cb9-35" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">vec!</span>[</span>
+<span id="cb9-36"><a href="#cb9-36" aria-hidden="true" tabindex="-1"></a>                        <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb9-37"><a href="#cb9-37" aria-hidden="true" tabindex="-1"></a>                        wallet_address<span class="op">.</span>clone()<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb9-38"><a href="#cb9-38" aria-hidden="true" tabindex="-1"></a>                    ]<span class="op">,</span></span>
+<span id="cb9-39"><a href="#cb9-39" aria-hidden="true" tabindex="-1"></a>                )<span class="op">,</span></span>
+<span id="cb9-40"><a href="#cb9-40" aria-hidden="true" tabindex="-1"></a>                (</span>
+<span id="cb9-41"><a href="#cb9-41" aria-hidden="true" tabindex="-1"></a>                    <span class="dv">2_u32</span><span class="op">,</span></span>
+<span id="cb9-42"><a href="#cb9-42" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">vec!</span>[</span>
+<span id="cb9-43"><a href="#cb9-43" aria-hidden="true" tabindex="-1"></a>                        <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb9-44"><a href="#cb9-44" aria-hidden="true" tabindex="-1"></a>                        wallet_address<span class="op">.</span>clone()<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb9-45"><a href="#cb9-45" aria-hidden="true" tabindex="-1"></a>                    ]<span class="op">,</span></span>
+<span id="cb9-46"><a href="#cb9-46" aria-hidden="true" tabindex="-1"></a>                )<span class="op">,</span></span>
+<span id="cb9-47"><a href="#cb9-47" aria-hidden="true" tabindex="-1"></a>            ]<span class="op">,</span></span>
+<span id="cb9-48"><a href="#cb9-48" aria-hidden="true" tabindex="-1"></a>        )<span class="op">,</span></span>
+<span id="cb9-49"><a href="#cb9-49" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-50"><a href="#cb9-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-51"><a href="#cb9-51" aria-hidden="true" tabindex="-1"></a>    add_allowed_action(</span>
+<span id="cb9-52"><a href="#cb9-52" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb9-53"><a href="#cb9-53" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">mut</span> allowed_actions<span class="op">,</span></span>
+<span id="cb9-54"><a href="#cb9-54" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;saa_invoke&quot;</span><span class="op">,</span></span>
+<span id="cb9-55"><a href="#cb9-55" aria-hidden="true" tabindex="-1"></a>        <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="dv">2_u32</span>]<span class="op">,</span></span>
+<span id="cb9-56"><a href="#cb9-56" aria-hidden="true" tabindex="-1"></a>        <span class="pp">Map::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban())</span>
+<span id="cb9-57"><a href="#cb9-57" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-58"><a href="#cb9-58" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-59"><a href="#cb9-59" aria-hidden="true" tabindex="-1"></a>    add_allowed_action(</span>
+<span id="cb9-60"><a href="#cb9-60" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb9-61"><a href="#cb9-61" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">mut</span> allowed_actions<span class="op">,</span></span>
+<span id="cb9-62"><a href="#cb9-62" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;transfer&quot;</span><span class="op">,</span></span>
+<span id="cb9-63"><a href="#cb9-63" aria-hidden="true" tabindex="-1"></a>        <span class="pp">vec!</span>[<span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span> <span class="dv">3_u32</span>]<span class="op">,</span></span>
+<span id="cb9-64"><a href="#cb9-64" aria-hidden="true" tabindex="-1"></a>        <span class="pp">Map::</span>new(<span class="op">&amp;</span>env<span class="op">.</span>soroban())</span>
+<span id="cb9-65"><a href="#cb9-65" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-66"><a href="#cb9-66" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-67"><a href="#cb9-67" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> standard_allowed_actions <span class="op">=</span> build_standard_actions(<span class="op">&amp;</span>env<span class="op">,</span> allowed_contracts<span class="op">,</span> allowed_actions<span class="op">,</span> <span class="cn">false</span>)<span class="op">;</span></span>
+<span id="cb9-68"><a href="#cb9-68" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb9-69"><a href="#cb9-69" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> arguments <span class="op">=</span> <span class="pp">vec!</span>[</span>
+<span id="cb9-70"><a href="#cb9-70" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">.</span>soroban()<span class="op">,</span></span>
+<span id="cb9-71"><a href="#cb9-71" aria-hidden="true" tabindex="-1"></a>        standard_allowed_actions<span class="op">.</span>into_val(env<span class="op">.</span>soroban())<span class="op">,</span></span>
+<span id="cb9-72"><a href="#cb9-72" aria-hidden="true" tabindex="-1"></a>    ]<span class="op">;</span></span>
+<span id="cb9-73"><a href="#cb9-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-74"><a href="#cb9-74" aria-hidden="true" tabindex="-1"></a>    env<span class="op">.</span>log()<span class="op">.</span>debug(<span class="st">&quot;Executing smart account transaction&quot;</span><span class="op">,</span> <span class="cn">None</span>)<span class="op">;</span></span>
+<span id="cb9-75"><a href="#cb9-75" aria-hidden="true" tabindex="-1"></a>    execute_smart_account_transaction(</span>
+<span id="cb9-76"><a href="#cb9-76" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb9-77"><a href="#cb9-77" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>NETWORK<span class="op">,</span></span>
+<span id="cb9-78"><a href="#cb9-78" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;https://horizon-testnet.stellar.org/transactions&quot;</span><span class="op">,</span></span>
+<span id="cb9-79"><a href="#cb9-79" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SOURCE_ACCOUNT<span class="op">,</span></span>
+<span id="cb9-80"><a href="#cb9-80" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SOUCRE_SECRET<span class="op">,</span></span>
+<span id="cb9-81"><a href="#cb9-81" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SMART_ACCOUNT<span class="op">,</span></span>
+<span id="cb9-82"><a href="#cb9-82" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>fname<span class="op">,</span></span>
+<span id="cb9-83"><a href="#cb9-83" aria-hidden="true" tabindex="-1"></a>        arguments<span class="op">,</span></span>
+<span id="cb9-84"><a href="#cb9-84" aria-hidden="true" tabindex="-1"></a>        SIGNATURE_DURATION<span class="op">,</span></span>
+<span id="cb9-85"><a href="#cb9-85" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SOUCRE_SECRET<span class="op">,</span></span>
+<span id="cb9-86"><a href="#cb9-86" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SMART_ACCOUNT<span class="op">,</span></span>
+<span id="cb9-87"><a href="#cb9-87" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>SMART_ACCOUNT_HASH<span class="op">,</span></span>
+<span id="cb9-88"><a href="#cb9-88" aria-hidden="true" tabindex="-1"></a>        <span class="cn">false</span><span class="op">,</span></span>
+<span id="cb9-89"><a href="#cb9-89" aria-hidden="true" tabindex="-1"></a>        INSTRUCTIONS_FIX<span class="op">,</span></span>
+<span id="cb9-90"><a href="#cb9-90" aria-hidden="true" tabindex="-1"></a>        WRITE_BYTES_FIX<span class="op">,</span></span>
+<span id="cb9-91"><a href="#cb9-91" aria-hidden="true" tabindex="-1"></a>        READ_BYTES_FIX<span class="op">,</span></span>
+<span id="cb9-92"><a href="#cb9-92" aria-hidden="true" tabindex="-1"></a>        RESOURCE_FEE_FIX<span class="op">,</span></span>
+<span id="cb9-93"><a href="#cb9-93" aria-hidden="true" tabindex="-1"></a>        FEE_FIX<span class="op">,</span></span>
+<span id="cb9-94"><a href="#cb9-94" aria-hidden="true" tabindex="-1"></a>        build_sig</span>
+<span id="cb9-95"><a href="#cb9-95" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-96"><a href="#cb9-96" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-97"><a href="#cb9-97" aria-hidden="true" tabindex="-1"></a>    env<span class="op">.</span>conclude(<span class="st">&quot;Successfully sent transaction&quot;</span>)</span>
+<span id="cb9-98"><a href="#cb9-98" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>

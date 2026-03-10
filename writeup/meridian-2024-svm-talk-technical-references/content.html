@@ -1,0 +1,197 @@
+<p><code>15/10/2024</code></p>
+<p>If you’ve made it to this post, it likely means that you are
+interested in the more technical aspect of my <a
+href="https://meridian.stellar.org">Meridian 2024</a> talk about the
+soroban virtual machine.</p>
+<p>As promised in the talk, this document serves the purpose of filling
+in the technical blanks that cannot be talked about in the actual talk
+due to accessibility and mainly available time.</p>
+<p><strong>Talk title</strong>: Reusing the Soroban VM and Toolchain for
+Off-Chain Applications <strong>Description</strong>: You may have
+thought that Soroban was only designed to run on-chain, but this session
+is going to let you in on a secret: the environment SDKs and tooling
+hold hidden potential beyond on-chain execution. This talk dives deep
+into these exciting off-chain use cases and explores how we can unlock
+their power. Join Co-Founder of Xycloo Labs, Tommaso De Ponti, to learn
+more about what’s powering the next generation of smart contracts on
+Stellar.</p>
+<h1 id="behind-retroshades-the-retroshades-svm-fork.">Behind
+Retroshades: The Retroshades SVM Fork.</h1>
+<h2 id="why-forking-the-svm-is-not-complex">Why Forking the SVM is Not
+Complex</h2>
+<p>The Soroban virtual machine is particularly well suited to be forked
+because of the level of abstraction from the VM logic and related
+functionality in the host context. As in itself, thanks to its
+architecture and metaprogramming, there are little references in the
+host context implementation towards the actual virtual machine logic (hf
+signatures, memory read/writes, wasm -&gt; soroban types casts, etc)
+which makes writing additional logic, especially if similar to existing
+one, incredibly easier than on other blockchain VMs.</p>
+<h2 id="adding-off-chain-functionality.">Adding Off-Chain
+Functionality.</h2>
+<p>When talking about forking the soroban virtual machine, there are a
+few things to keep into account. First of all, you need to understand
+whether the customization you aim to add involves the need of a
+dedicated soroban host function. If so, you’ll need to tamper with the
+<code>env.json</code> host functions definition to create an export
+within a module. This will automatically add the function definition
+into the <code>VmCaller</code> trait, where you’ll find all other
+Soroban host functions:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> VmCallerEnv <span class="cf">for</span> Host <span class="op">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> VmUserState <span class="op">=</span> Host<span class="op">;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> zephyr_emit(</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>        _vmcaller<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> VmCaller<span class="op">&lt;</span>Host<span class="op">&gt;,</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>        target<span class="op">:</span> Val<span class="op">,</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>        event<span class="op">:</span> Val<span class="op">,</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>Void<span class="op">,</span> HostError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>        <span class="kw">self</span><span class="op">.</span>record_retroshade(target<span class="op">,</span> event)<span class="op">?;</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Ok</span>(<span class="pp">Val::</span>VOID)</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 id="storing-within-the-store-context.">Storing within the store
+context.</h3>
+<p>If your fork requires to keep data in-memory within the wasm store
+context of the VM so that it can be accessed elsewhere either during
+runtime by other host functions or at the end of the execute as an
+effect, you’ll have to add your data to the <code>HostImpl</code>
+object.</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>derive<span class="at">(</span><span class="bu">Clone</span><span class="op">,</span> <span class="bu">Default</span><span class="at">)]</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> HostImpl <span class="op">{</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    zephyr_adapter<span class="op">:</span> RefCell<span class="op">&lt;</span>ZephyrAdapter<span class="op">&gt;,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="co">// ...</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr/>
+<h1 id="vm-abstraction-behing-the-zvms-soroban-functionality.">VM
+Abstraction: Behing the ZVM’s Soroban Functionality.</h1>
+<p>Part of the talk revolves around virtual machine abstraction and why
+it’s needed to implement soroban host functionality within other WASM
+VMs. This is an incredibly interesting use case because it allows you
+to: - Actuall check out performance on wasm compilers vs interpreters,
+both with cached and non-cached binaries. - Use soroban’s host-guest
+object transmission to power other unrelated VMs (blockchain VMs,
+baremetal VMs).</p>
+<p>This looks straightforward, but in reality there are a few facets to
+be taken into account.</p>
+<h2 id="most-of-the-soroban-vm-is-vm-abstraction-friendly.">Most of the
+Soroban VM is VM-abstraction friendly.</h2>
+<p>Again, the SVM is very well equipped when it comes to VM abstraction
+(see paragraphs above). Most of Soroban’s host function don’t require a
+handle over the VM’s memory, and for those you’ll just have to find a
+good way for them to to be accessed from the guest. You’ll also need to
+think about keeping a soroban host environment within your VM’s context
+during its execution.</p>
+<p>The best way to achieve this is probably to wrap the soroban host
+within your own host implementation:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// Zephyr Host State Implementation.</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>derive<span class="at">(</span><span class="bu">Clone</span><span class="at">)]</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> HostImpl<span class="op">&lt;</span>DB<span class="op">:</span> ZephyrDatabase<span class="op">,</span> L<span class="op">:</span> LedgerStateRead<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co">// ...</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="co">/// Wrapper for the Soroban Host Environment</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> soroban<span class="op">:</span> RefCell<span class="op">&lt;</span><span class="pp">soroban_env_host::</span>Host<span class="op">&gt;,</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>And modify Soroban’s linking macros to unwrap the actual soroban host
+from the host in store:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="pp">macro_rules!</span> generate_dispatch_functions <span class="op">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>        <span class="op">$</span>(</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>            <span class="op">$</span>(<span class="at">#[</span><span class="op">$</span>mod_attr<span class="op">:</span>meta<span class="at">]</span>)<span class="op">*</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>            <span class="kw">mod</span> <span class="op">$</span>mod_name<span class="op">:</span>ident <span class="op">$</span>mod_str<span class="op">:</span>literal</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>                <span class="op">$</span>(</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>                    <span class="op">$</span>(<span class="at">#[</span><span class="op">$</span>fn_attr<span class="op">:</span>meta<span class="at">]</span>)<span class="op">*</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>                    <span class="op">{</span> <span class="op">$</span>fn_str<span class="op">:</span>literal<span class="op">,</span> <span class="op">$</span>(<span class="op">$</span>min_proto<span class="op">:</span>literal)<span class="op">?,</span> <span class="op">$</span>(<span class="op">$</span>max_proto<span class="op">:</span>literal)<span class="op">?,</span> <span class="kw">fn</span> $fn_id:ident (<span class="op">$</span>(<span class="op">$</span>arg<span class="op">:</span>ident<span class="op">:$</span>type<span class="op">:</span>ty)<span class="op">,*</span>) <span class="op">-&gt;</span> <span class="op">$</span>ret<span class="op">:</span>ty <span class="op">}</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>                )<span class="op">*</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>        )<span class="op">*</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">=&gt;</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">$</span>(</span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>            <span class="op">$</span>(</span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>                <span class="op">$</span>(<span class="at">#[</span><span class="op">$</span>fn_attr<span class="at">]</span>)<span class="op">*</span></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>                <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> $fn_id<span class="op">&lt;</span>DB<span class="op">:</span> ZephyrDatabase <span class="op">+</span> <span class="bu">Clone</span> <span class="op">+</span> <span class="ot">&#39;static</span><span class="op">,</span> L<span class="op">:</span> LedgerStateRead <span class="op">+</span> <span class="ot">&#39;static</span><span class="op">&gt;</span>(caller<span class="op">:</span> <span class="pp">wasmi::</span>Caller<span class="op">&lt;</span>Host<span class="op">&lt;</span>DB<span class="op">,</span> L<span class="op">&gt;&gt;,</span> <span class="op">$</span>(<span class="op">$</span>arg<span class="op">:</span><span class="dt">i64</span>)<span class="op">,*</span>) <span class="op">-&gt;</span></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a>                    (<span class="dt">i64</span><span class="op">,</span>)</span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a>                <span class="op">{</span></span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">let</span> host<span class="op">:</span> <span class="pp">soroban_env_host::</span>Host <span class="op">=</span> <span class="pp">Host::</span><span class="op">&lt;</span>DB<span class="op">,</span> L<span class="op">&gt;</span><span class="pp">::</span>soroban_host(<span class="op">&amp;</span>caller)<span class="op">;</span></span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a>            )<span class="op">*</span></span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a>        )<span class="op">*</span></span>
+<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span>
+<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>That said, functions that do need to read from the VM’s memory need
+to be rewired to accept a VM generic instead of the VmCaller object.</p>
+<p>To achieve this we need to</p>
+<ul>
+<li>Create a generic VM object trait that can read/write to the VM’s
+memory.</li>
+<li>Implement the changes into existing host environment functions that
+read/write the VMs memory.</li>
+</ul>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co">/// A trait that VMs that want to work with a custom context should</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co">/// implement.</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">trait</span> CustomContextVM <span class="op">{</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="co">/// Return WASMI&#39;s Memory handle.</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> read(<span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span> mem_pos<span class="op">:</span> <span class="dt">usize</span><span class="op">,</span> buf<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> [<span class="dt">u8</span>])<span class="op">;</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> data(<span class="op">&amp;</span><span class="kw">self</span>) <span class="op">-&gt;</span> <span class="op">&amp;</span>[<span class="dt">u8</span>]<span class="op">;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> write(<span class="op">&amp;</span><span class="kw">mut</span> <span class="kw">self</span><span class="op">,</span> pos<span class="op">:</span> <span class="dt">u32</span><span class="op">,</span> slice<span class="op">:</span> <span class="op">&amp;</span>[<span class="dt">u8</span>]) <span class="op">-&gt;</span> <span class="dt">i64</span><span class="op">;</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> data_mut(<span class="op">&amp;</span><span class="kw">mut</span> <span class="kw">self</span>) <span class="op">-&gt;</span> <span class="op">&amp;</span><span class="kw">mut</span> [<span class="dt">u8</span>]<span class="op">;</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> vec_new_from_linear_memory_mem<span class="op">&lt;</span>M<span class="op">:</span> CustomContextVM<span class="op">&gt;</span>(</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    m<span class="op">:</span> M<span class="op">,</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    vals_pos<span class="op">:</span> U32Val<span class="op">,</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    len<span class="op">:</span> U32Val<span class="op">,</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>VecObject<span class="op">,</span> HostError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> MemFnArgsCustomVm <span class="op">{</span> pos<span class="op">,</span> len<span class="op">,</span> <span class="op">..</span> <span class="op">}</span> <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>get_mem_fn_args_custom_vm(<span class="op">&amp;</span>m<span class="op">,</span> vals_pos<span class="op">,</span> len)<span class="op">;</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">Vec</span><span class="pp">::</span><span class="op">&lt;</span>Val<span class="op">&gt;</span><span class="pp">::</span>charge_bulk_init_cpy(len <span class="kw">as</span> <span class="dt">u64</span><span class="op">,</span> <span class="kw">self</span>)<span class="op">?;</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> vals<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span>Val<span class="op">&gt;</span> <span class="op">=</span> <span class="pp">vec!</span>[<span class="pp">Val::</span>VOID<span class="op">.</span>to_val()<span class="op">;</span> len <span class="kw">as</span> <span class="dt">usize</span>]<span class="op">;</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    <span class="co">// charge for conversion from bytes to `Val`s</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>charge_budget(</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>        <span class="pp">ContractCostType::</span>MemCpy<span class="op">,</span></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Some</span>((len <span class="kw">as</span> <span class="dt">u64</span>)<span class="op">.</span>saturating_mul(<span class="dv">8</span>))<span class="op">,</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>    )<span class="op">?;</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span><span class="pp">metered_vm_read_vals_from_linear_memory_mem::</span><span class="op">&lt;</span><span class="dv">8</span><span class="op">,</span> Val<span class="op">,</span> M<span class="op">&gt;</span>(</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>m<span class="op">,</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>        pos<span class="op">,</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>        vals<span class="op">.</span>as_mut_slice()<span class="op">,</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>        <span class="op">|</span>buf<span class="op">|</span> <span class="cn">Ok</span>(<span class="pp">Val::</span>from_payload(<span class="dt">u64</span><span class="pp">::</span>from_le_bytes(<span class="op">*</span>buf)))<span class="op">,</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>    )<span class="op">?;</span></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> v <span class="kw">in</span> vals<span class="op">.</span>iter() <span class="op">{</span></span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>        <span class="kw">self</span><span class="op">.</span>check_val_integrity(<span class="op">*</span>v)<span class="op">?;</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>    <span class="kw">self</span><span class="op">.</span>add_host_object(<span class="pp">HostVec::</span>from_vec(vals)<span class="op">?</span>)</span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> metered_vm_read_vals_from_linear_memory_mem<span class="op">&lt;</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">const</span> VAL_SZ<span class="op">:</span> <span class="dt">usize</span><span class="op">,</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    VAL<span class="op">,</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    M<span class="op">:</span> CustomContextVM<span class="op">,</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="op">&gt;</span>(</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    m<span class="op">:</span> <span class="op">&amp;</span>M<span class="op">,</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>    mem_pos<span class="op">:</span> <span class="dt">u32</span><span class="op">,</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>    buf<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> [VAL]<span class="op">,</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>    from_le_bytes<span class="op">:</span> <span class="kw">impl</span> <span class="bu">Fn</span>(<span class="op">&amp;</span>[<span class="dt">u8</span><span class="op">;</span> VAL_SZ]) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>VAL<span class="op">,</span> HostError<span class="op">&gt;,</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> HostError<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ...</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> mem_data <span class="op">=</span> m<span class="op">.</span>data()<span class="op">;</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> mem_slice <span class="op">=</span> mem_data</span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>get(mem_range)</span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>ok_or_else(<span class="op">||</span> <span class="kw">self</span><span class="op">.</span>err_oob_linear_memory())<span class="op">?;</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ...</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(())</span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>

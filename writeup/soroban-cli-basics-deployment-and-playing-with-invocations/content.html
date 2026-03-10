@@ -1,0 +1,280 @@
+<h1 class="unnumbered" id="introduction">Introduction</h1>
+<p>If you have already tried out soroban, you are probably already
+familiar with Rust tests. While tests are a good way of simulating
+scenarios, when it comes down to actually deploying and invoking a
+contract you’ll have to leave the comfort of Rust tests and learn how
+the soroban CLI works. In this simple tutorial, I’ll cover some of the
+basics of the Soroban CLI.</p>
+<h1 class="unnumbered" id="writing-a-simple-contract">Writing a simple
+contract</h1>
+<p>For this article, I have created a contract that is simple but that
+is also a good example for explaining stuff like passing custom types to
+the CLI.</p>
+<p>So what does this contract do?</p>
+<h2 class="unnumbered" id="contract-workflow">Contract workflow</h2>
+<p>The contract has two functions:</p>
+<ul>
+<li><p><code>change_val(key: Bytes, value: Address)</code>, which
+creates or modifies a contract data entry that has <code>Bytes</code> as
+key, and an <code>Address</code> as value. Additionally, the value for
+the key can only be modified if the invoker is the address in stored as
+the value.</p></li>
+<li><p><code>get(key: Bytes)</code>, which is a simple getter which
+returns the address associated with the provided
+<code>key</code>.</p></li>
+</ul>
+<h1 class="unnumbered" id="writing-the-contract">Writing the
+contract</h1>
+<p>Assuming that you are already familiar with the basics of Soroban
+smart contracts and remembering what we said in the contract’s workflow,
+you should be able to understand the following code:</p>
+<pre><code>#![no_std]
+use soroban_auth::{verify, Identifier, Signature};
+use soroban_sdk::{contractimpl, symbol, AccountId, Address, Bytes, Env};
+
+pub struct ExampleContract;
+
+#[contractimpl]
+impl ExampleContract {
+    pub fn change_val(e: Env, key: Bytes, value: Identifier) {
+        let stored_addr = e
+            .data()
+            .get(key.clone())
+            .unwrap_or_else(|| Ok(Identifier::Contract(e.current_contract())))
+            .unwrap();
+
+        if stored_addr == Identifier::Contract(e.current_contract()) {
+            e.data().set(key, value);
+        } else {
+            let invoker_id = match e.invoker() {
+                Address::Account(id) =&gt; Identifier::Account(id),
+                Address::Contract(id) =&gt; Identifier::Contract(id),
+            };
+
+            if stored_addr != invoker_id {
+                panic!(&quot;you are not allowed to change this value&quot;)
+            }
+
+            e.data().set(key, value)
+        }
+    }
+    
+    pub fn get(e: Env, key: Bytes) -&gt; Identifier {
+        e.data()
+            .get(key)
+            .unwrap_or_else(|| panic!(&quot;Key does not exist&quot;))
+            .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod test;
+</code></pre>
+<p>Below is a successful invocation made with unit testing:</p>
+<pre><code>#[test]
+fn test_change_val() {
+    let e = Env::default();
+
+    let user = e.accounts().generate();
+
+    let contract_id = e.register_contract(None, ExampleContract);
+    let client = ExampleContractClient::new(&amp;e, &amp;contract_id);
+
+    client.with_source_account(&amp;user).change_val(
+        &amp;bytes!(&amp;e, 0x68656c6c6f),
+        &amp;soroban_auth::Identifier::Account(user.clone()),
+    );
+
+    assert_eq!(
+        client.get(&amp;bytes!(&amp;e, 0x68656c6c6f)),
+        Identifier::Account(user)
+    )
+}</code></pre>
+<p>Let’s say we now want to deploy and then invoke this contract on a
+local network or futurenet, just like in this test, how would that
+work?</p>
+<h1 class="unnumbered"
+id="futurenetstandalone-network-deploying-and-invoking">Futurenet/Standalone
+Network: Deploying and Invoking</h1>
+<p>Before deploying we need to build the WASM binary:</p>
+<pre><code>cargo +nightly build \
+    --target wasm32-unknown-unknown \
+    --release \
+    -Z build-std=std,panic_abort \
+    -Z build-std-features=panic_immediate_abort</code></pre>
+<p>We can now deploy the WASM binary:</p>
+<pre><code>&gt; soroban deploy \
+--wasm target/wasm32-unknown-unknown/release/test_soroban_cli_futurenet.wasm --secret-key DEPLOYER_SECRET --rpc-url http://INSTANCE_HOST:8000/soroban/rpc --network-passphrase &#39;Standalone Network ; February 2017&#39;
+
+output:
+CONTRACT_ID</code></pre>
+<h1 class="unnumbered" id="invoking-change_val">Invoking change_val</h1>
+<p>Now that we have the contract ID, we can invoke the
+<code>change_val</code> function:</p>
+<pre><code>soroban invoke \
+  --id CONTRACT_ID \
+  --secret-key INVOKER_SECRET \
+  --rpc-url http://INSTANCE_HOST:8000/soroban/rpc \
+  --network-passphrase &#39;Standalone Network ; February 2017&#39; \
+  --fn change_val --arg &quot;48656c6c6f20576f726c64&quot;\
+  --arg &#39;{&quot;object&quot;:{&quot;vec&quot;:[{&quot;symbol&quot;:&quot;Account&quot;},{&quot;object&quot;:{&quot;accountId&quot;:{&quot;publicKeyTypeEd25519&quot;:&quot;5baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d&quot;}}}]}}&#39;
+
+output:
+  success
+  null</code></pre>
+<p>The only thing that is not straightforward here is the last argument,
+the <code>Identifier</code>. How do we go from a stellar public key like
+GAVZ3QP2PV2ZXOM72C5VQYTSOO4YCQLS3VXQBERL337OUDOKUFMUFOVR, to
+<code>{"object":{"vec":[{"symbol":"Account"},{"object":{"accountId":{"publicKeyTypeEd25519":"5baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d"}}}]}}</code>?</p>
+<p>The first thing to think of is going from
+GAVZ3QP2PV2ZXOM72C5VQYTSOO4YCQLS3VXQBERL337OUDOKUFMUFOVR to
+5baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d: since
+stellar keys are strencoded, we need to strdecode it and then turn the
+obtained buffer into a hex string.<br />
+To strdecode GAVZ3QP2PV2ZXOM72C5VQYTSOO4YCQLS3VXQBERL337OUDOKUFMUFOVR we
+can use the <code>rs-stellar-strkey</code> crate.</p>
+<pre><code>use stellar_strkey::*;
+
+fn test_strkey_decode() {
+    std::println!(
+        &quot;{:?}&quot;,
+        Strkey::from_string(&quot;GAVZ3QP2PV2ZXOM72C5VQYTSOO4YCQLS3VXQBERL337OUDOKUFMUFOVR&quot;)
+    );
+}</code></pre>
+<p>This will return a buffer:
+<code>Ok(PublicKeyEd25519(StrkeyPublicKeyEd25519([91, 170, 143, 26, 117, 38, 38, 141, 31, 175, 244, 176, 65, 119, 128, 10, 91, 50, 63, 0, 188, 61, 39, 251, 108, 51, 131, 62, 16, 208, 81, 141])))</code>.</p>
+<p>Now we can use this simple <a
+href="https://go.dev/play/p/z3yJPp72K8B">script</a> to turn this buffer
+into a hex string, which returns
+<code>Encoded Hex String: 5baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d</code>.</p>
+<p>Now that we know what is the id, we need to construct a valid type
+using the CLI’s JSON specification for XDR conversion.</p>
+<p>We need to transform <code>Identifier::Account(account_id)</code>
+into a valid parseable JSON. By default, enums are objects that contain
+an array of length 1 which contains the symbol containing the enum’s
+variant name. So if we had something like
+<code>Identifier::Account</code>, it would become
+<code>{"object":{"vec":[{"symbol":"Account"}]}}</code>. But in our case,
+we need to represent a tuple variant, so the array will have a length of
+two: first the symbol with the variant name, and then the value of the
+tuple. Given that an <code>AccountId</code> looks like this:
+<code>{"object":{"accountId":{"publicKeyTypeEd25519":"id"}}}</code>, the
+<code>Identifier::Account(AccountId)</code> variant will look like
+this:</p>
+<pre><code>{
+  &quot;object&quot;: {
+    &quot;vec&quot;: [
+      {
+        &quot;symbol&quot;: &quot;Account&quot;
+      },
+      {
+        &quot;object&quot;: {
+          &quot;accountId&quot;: {
+            &quot;publicKeyTypeEd25519&quot;: ID
+          }
+        }
+      }
+    ]
+  }
+}</code></pre>
+<p>So we just replace ID with the previously obtained hex value and we
+are golden! Also note that we pass bytes with a hex string (which is
+easier to share).</p>
+<h1 class="unnumbered" id="invoking-get">Invoking get</h1>
+<p>Invoking get is very simple:</p>
+<pre><code>soroban invoke \                                        
+  --id dbaf122037cfe68a0d47345efa8480bfbe05c0a31a48bb9f6ca63b5508a338c0 \
+  --secret-key SECRET \
+  --rpc-url http://INSTANCE_HOST:8000/soroban/rpc \
+  --network-passphrase &#39;Standalone Network ; February 2017&#39; \
+  --fn get --arg &quot;48656c6c6f20576f726c64&quot;   
+
+output:
+  success
+  [&quot;Account&quot;,&quot;GBN2VDY2OUTCNDI7V72LAQLXQAFFWMR7AC6D2J73NQZYGPQQ2BIY2O7X&quot;]</code></pre>
+<h1 class="unnumbered" id="the-invoker-signature">The invoker
+signature</h1>
+<p>What if our contract had a function that does the same thing as
+<code>change_val</code> but relies on a <code>Signature</code> rather
+than on the invoker? That way anyone with a valid signature can invoke
+the function without the need of being the invoker (note that for
+simplicity we are not using the nonce, which prevents from re-using this
+signature, to implement the nonce just add a <code>BigInt</code> in the
+signature args and match it against a saved nonce for the signature
+identifier):</p>
+<pre><code>#![no_std]
+use soroban_auth::{verify, Identifier, Signature};
+use soroban_sdk::{contractimpl, symbol, AccountId, Address, Bytes, Env};
+
+pub struct ExampleContract;
+
+#[contractimpl]
+impl ExampleContract {
+    pub fn use_sig(e: Env, sig: Signature, key: Bytes, value: Identifier) {
+        let stored_addr = e
+            .data()
+            .get(key.clone())
+            .unwrap_or_else(|| Ok(Identifier::Contract(e.current_contract())))
+            .unwrap();
+
+        if stored_addr == Identifier::Contract(e.current_contract()) {
+            e.data().set(key, value);
+        } else {
+            if stored_addr != sig.identifier(&amp;e) {
+                panic!(&quot;you are not allowed to change this value&quot;)
+            }
+
+            verify(&amp;e, &amp;sig, symbol!(&quot;change&quot;), (key.clone(), value.clone()));
+
+            e.data().set(key, value)
+        }
+    }
+}
+
+#[cfg(test)]
+mod test;
+</code></pre>
+<p>Here what happens is that the fn takes one parameter more, which is
+the signature, then asserts that the identifier of the signature is in
+fact the identifier we want to modify, and lastly verifies that the
+signature is indeed correct.</p>
+<p>A working test looks like this:</p>
+<pre><code>#[test]
+fn test_use_sig() {
+    let e = Env::default();
+
+    let user = e.accounts().generate();
+
+    let contract_id = e.register_contract(None, ExampleContract);
+    let client = ExampleContractClient::new(&amp;e, &amp;contract_id);
+
+    client.with_source_account(&amp;user).use_sig(
+        &amp;soroban_auth::Signature::Invoker,
+        &amp;bytes!(&amp;e, 0x68656c6c6f),
+        &amp;Identifier::Account(user.clone()),
+    );
+
+    assert_eq!(
+        client.get(&amp;bytes!(&amp;e, 0x68656c6c6f)),
+        Identifier::Account(user)
+    )
+}</code></pre>
+<p>How would we invoke such a function from the CLI? The challenge is
+that we need to pass <code>Signature::Invoker</code>, fortunately, if
+you paid attention in the invoking <code>change_val</code> paragraph,
+you should be able to do this. In fact, since
+<code>Signature::Invoker</code> in a unit variant, we can simply write
+it like this:
+<code>{"object":{"vec":[{"symbol":"Invoker"}]}}</code>:</p>
+<pre><code>soroban invoke \
+  --id 2857ffc7348724e4edc257073ac30ff75613225b67c9cfe5b949c6b8d368e8ad \
+  --secret-key SECRET \
+  --rpc-url http://INSTANCE_HOST:8000/soroban/rpc \
+  --network-passphrase &#39;Standalone Network ; February 2017&#39; \
+  --fn use_sig --arg &#39;{&quot;object&quot;:{&quot;vec&quot;:[{&quot;symbol&quot;:&quot;Invoker&quot;}]}}&#39; --arg &quot;48656c6c6f20576f726c64&quot;\
+  --arg &#39;{&quot;object&quot;:{&quot;vec&quot;:[{&quot;symbol&quot;:&quot;Account&quot;},{&quot;object&quot;:{&quot;accountId&quot;:{&quot;publicKeyTypeEd25519&quot;:&quot;5baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d&quot;}}}]}}&#39;</code></pre>
+<h1 class="unnumbered" id="conclusion">Conclusion</h1>
+<p>I hope this was a good way of showcasing the basics behind almost
+evreything CLI-related: deploying, simple invocations, custom structures
+and simple authentication. If you have any questions or notice any bugs
+please open an issue on this repo.</p>

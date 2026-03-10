@@ -1,0 +1,418 @@
+<p><code>14/10/2025</code></p>
+<p>Also posted at https://x.com/heytdep/status/1978172938206802036.</p>
+<p>Last week I posted a thread on how <a
+href="https://wiretap.fail/">wiretap.fail</a> works and how it affects
+web3 products that are being built on top of TEEs. The tldr of the
+thread is that an attacker can attach a bus interposition probe that
+connects the DRAM to a logic analyzer; thus, continued physical access
+to the hardware for the duration of the attack is required in order to
+crack the ciphertext for the attestation key and be able to generate
+arbitrary attestations.</p>
+<p>The biggest counterargument towards such physical attacks in a web3
+setting is that a single chip won’t ever be considered safe to perform
+sensitive actions alone, whether that be for safety around integrity or
+confidentiality. For example, a protocol that:</p>
+<ul>
+<li>needs to guarantee confidentiality may employ an MPC scheme so that
+each node contributes only partly to the whole computation, keeping
+confidentiality up to a certain threshold.</li>
+<li>only wants to guarantee integrity, may use a simple threshold-based
+signing scheme across the same quorum set.</li>
+</ul>
+<p>Either way, the concept is that to takeover the protocol, the
+attacker must physically attack <em>T</em> nodes where <em>T</em> is the
+safety threshold, and considering that carrying out such attacks is
+expensive, complex, and simply likely not accessible depending on which
+entity provisions the servers, distributing safety across multiple nodes
+scales the attack’s complexity non-linearly. I want to do a long-form
+article on this concept as well, but this chart summarizes the whole
+concept from a game-theoretical approach:</p>
+<p><img
+src="https://pbs.twimg.com/media/G3Kr1qGW4AIb0QA?format=png&amp;name=900x900" /></p>
+<blockquote>
+<p>NB: T, .. instead of only T because there are several other non
+deterministic factors besides the safety threshold contributing to
+economic security here which is also why it’s weird to have a game
+theoretic approach to TEE safety, e.g., it’s difficult to quantify the
+level of collusion required to hack the chip in a setup where the input
+is multidimensional.</p>
+</blockquote>
+<h1
+id="what-if-whats-being-exploited-doesnt-require-physical-access"><strong>What
+if what’s being exploited doesn’t require physical access?</strong></h1>
+<p>Without diving too much into it, there’s multiple layers at which a
+TEE can get side-channeled for example physical access to hardware,
+compromised os, or compromised user space. With each layer there’s more
+abstractions and complexity drops, i.e., attacking from hypervisor’s
+user-space is much cheaper simpler and feasible than a physical attack.
+In this case, the economic security argument made above doesn’t hold (!)
+which is indeed an issue for any protocol that is relying on it (like we
+currently do <a href="https://x.com/@Tplus_cx"><span class="citation"
+data-cites="Tplus_cx">@Tplus_cx</span></a>), especially those who are
+<strong>strongly</strong> relying on the confidentiality guarantees and
+don’t want leakage around secret inputs (spoiler; we don’t at tplus but
+still explored the topic).</p>
+<p>Note that architectural exploits that do not require physical side
+channels are indeed in TEEs’ threat model so we discard them from this
+article’s scope (and I generally won’t write about them) as we can
+assume those will be patched if discovered. Physical attacks are the hot
+topic because as I mentioned above we can’t do much software level and
+need to fallback to distributed cryptography techniques. Interface
+attacks on the other hand are not too much in the public eye, which is
+fundamentally unsafe considering it has vastly to do with how software
+running inside the TEE is written.</p>
+<p>In this article I want to talk about this last category and how it
+affects SGX and TDX.</p>
+<h1 id="interface-based-side-channel-attack-isa"><strong>Interface Based
+Side Channel Attack (“ISA”)</strong></h1>
+<blockquote>
+<p>NB: in this category I’m not considering exploits that rely on
+incorrect design decisions of the enclaves’ interfaces.</p>
+</blockquote>
+<blockquote>
+<p>NB: here I refer to ISA as Interface based Side channel Attack not as
+in instruction-set architecture.</p>
+</blockquote>
+<p>This form of attack basically relies on tapping into the interfaces
+that the enclave uses to communicate with the untrusted host, e.g., io
+and enclave calls/responses which both rely on the untrusted
+hypervisor.</p>
+<p>Like most side channel attacks we can split the attack workflow into
+two parts (just like we did for wiretap!):</p>
+<ul>
+<li>setup</li>
+<li>exploit</li>
+</ul>
+<p><strong>Setup.</strong> In this case the setup consists of two steps;
+(i) replacing the shared libraries between hypervisor &lt;&gt; TEE guest
+with modified ones that allow the attacker to tap into both the traffic
+itself as well as grab indirect side info like clock cycle variations.
+(ii) preparing and calibrating the model to write an inference function
+to help us (the attacker) determine encumbered secrets. We can
+generalize this model as a function that infers a set of secrets
+(<em>S=s_1, s_2, s_n</em>) by observing encrypted inputs (<em>X=x_1,
+x_2, x_i</em>) and observations (<em>Y=y_1, y_2, y_i where y_i = [set of
+observations for i]</em> ) around those inputs.</p>
+<blockquote>
+<p>NB: depending on the technology that we want to attack (e.g., SGX or
+TDX) X and Y are obtained and calculated in different ways, that’s why
+above I describe a very generic scenario where the goal is to find
+s(e(X))=S knowing that e(X)=Y (i.e., function that extracts observations
+from inputs), f(X, S) = Y where we only don’t know S and f is the code
+that is being run).</p>
+</blockquote>
+<p><strong>Exploit</strong>. Once we have our model as generalized under
+<em>s(e(X))</em> we can carry out the exploit by listening for each new
+input x’ and computing <em>s(e(x’))</em>. As you can notice, this attack
+does not necessarily yield fine-grained information rather only a
+prediction of it where the probability of the prediction being near
+correct depends a lot on <em>f</em> and <em>X</em>. This is actually
+good news because it means that everything is in the developer’s hands
+to write <em>f</em> so that it doesn’t yield <em>Y</em> informative
+enough to compute the model <em>s(Y)</em>.</p>
+<blockquote>
+<p>NB: in practice here S is generally included in X.</p>
+</blockquote>
+<h1 id="re-isa-on-intel-sgx"><strong>Re; ISA on Intel SGX</strong></h1>
+<p>If we want to attack the interface from the user-space, we can easily
+assert that the most interesting technologies to look into are those
+that favor splitting workflows into multiple jumps between trusted
+&lt;&gt; untrusted components as those expose a much larger attack
+surface thus give us much more information to calibrate our attack
+during the offline phase, just like SGX.</p>
+<p>In general, the idea that the enclave should only contain minimal
+logic to preserve the integrity and confidentiality guarantees that are
+required for the application while additional logic should live on the
+untrusted host means that we are led to expose much more information
+about the enclave’s runtime, which is also likely the reason why
+interface based side channels have been “formalized” only on SGX and not
+TDX since the latter works with legacy VMs where most if not all of the
+computation lives within the trusted guest vm. Anyways, back to SGX,
+there’s a <a
+href="http://www2.hawaii.edu/~yaozheng/publication/zhang-interface-based-side-channel-2024/">very
+interesting paper</a> that covers an interface based side channel attack
+on <a
+href="https://www.redhat.com/en/topics/virtualization/what-is-nfv">NFVs</a>
+that aim to secure user data confidentiality (e.g., accessed web pages)
+through SGX. Besides the scope of the attack, the most interesting part
+is the methodology and the mitigations which we can indirectly apply to
+the domain of TDX apps in web3.</p>
+<p><strong>NFVs attack.</strong> Just to give some context on the attack
+methodology at a lower level, I briefly describe the NFVs attack
+described in the paper. Here <em>S</em> is the webpage url that is
+accessed by the user, <em>X</em> is the collected encrypted packets, and
+<em>Y</em> is the set of “side channel features” for <em>X</em>, i.e.,
+the observations we can make that aid in determining <em>S</em> through
+<em>S(Y)</em>. During the setup phase the researchers collected various
+data points:</p>
+<ul>
+<li>interface invocations sequences i.e., record all ecalls and ocalls
+to know what enclaves have been invoked and in which order and the clock
+times of the invocation.</li>
+</ul>
+<blockquote>
+<p>NB: in sgx enclaves are called by the untrusted host through the
+ECALL instruction and the enclave gets back to the host by writing to an
+ocall table that is specified in the ECALL through the OCALL. Thus to
+interpose here the researchers have swapped the shared libsgx library in
+the ld preload for one that emulates the exact same behavior as the
+original library but which dumps record of the data for the ECALLs and
+temporarily hijacks the OCALLs return table to be able to inspect the
+returned traffic before forwarding it to the actual ocall memory
+point.</p>
+<ul>
+<li>ecall/ocall parameter size</li>
+<li>clock times delta between ecalls and ocalls allow to know the
+processing time.</li>
+</ul>
+</blockquote>
+<p>In this setup, we now have <em>X=x_1, x_i</em> where <em>x_i =
+{packet_0, p_n}, Y = y_0, y_i</em> where <em>y_i = {p_{i_0},
+p_{i_m}}</em>, i.e., for each set of input packets we have a set of
+features that we can extract (<em>m != n</em>, <em>m</em> here depends a
+lot on the program’s function <em>f</em> ). With this in mind, let’s see
+how the attack actually works:</p>
+<ul>
+<li>packets with suspicious/interesting contents trigger an ocall log
+function to the fs.</li>
+<li>different packets go through different forwarding path (packets that
+are suspicious go through WAF inspection others go to NAT
+directly).</li>
+<li>packet size can be known since tls cannot conceal its size and some
+code branches (e.g., if required by an optimization if a certain
+condition is encountered) transform packet sizes.</li>
+</ul>
+<p>basically, f behaves differently and makes different invocations
+depending on the input packets and researchers have constructed a
+dictionary, <em>e(X),</em> to compute Y:</p>
+<p><a
+href="https://pbs.twimg.com/media/G3OZWvvWMAAo0Vh?format=png&amp;name=medium">Image</a></p>
+<p>with some noise cancellation the researchers computed a model
+<em>s(Y)</em> to infer sensitive information from the input packets! The
+results are along the lines of what one would expect considering the
+dictionary is obviously built upon tracked webpages:</p>
+<blockquote>
+<p>The accuracy and recall of our web page identifying algorithm can
+reach from 84.2% to 97.1% and from 76.6% to 92.1% respectively, when the
+total amount of web pages in traffic varies from 1k to 5k. The accuracy
+drops when the number of web pages increases. This decline is caused by
+the common packets contained by different tracked web pages…</p>
+</blockquote>
+<p>Nothing special or particularly impacting on the web3 intersection of
+TEEs but in my opinion it’s incredibly interesting to observe how leaked
+signals on the user space can actually be used as side channel features
+with varying degrees of success depending on <em>f</em>. Let’s look at a
+more practical case also briefly explored within the paper, cracking RSA
+keys.</p>
+<p><strong>Reducing RSA Key Attack Domain</strong>. What if we can find
+<em>Y</em> on an RSA function <em>f</em> so that <em>Y</em> is bound to
+the secret <em>S</em> in causation and not correlation? If for a RSA key
+the maximum amount of attempts to crack the private key depends on the
+entropy of the private exponent (<em>d</em>) used in exponentiation,
+which in turn depends on the window pattern (i.e., zero or non zero bit
+chunks in <em>d</em>), then if we can guess the zero windows in d then
+we can shrink the search domain for the brute force attack. Turns out,
+<em>f(X, S)</em> changes behavior if the processed window d is zero or
+non-zero which impacts timing. This allowed researchers to sometimes
+shrink the search domain by orders of magnitude. Again, this is a
+probabilistic attack that basically winds down to potentially
+simplifying a brute force attack, but shows that we can carry out side
+channels based that impact integrity directly from the user space if
+we’re not cautious in <em>f(X, S)</em>.</p>
+<p><strong>Mitigations.</strong> As I mentioned above, the mitigations
+here are interesting since they basically resort to (i) transforming
+code with branch and loop obfuscation to hide both the timing and the
+control flow of the calls (ii) constant size wrapper for the dataset
+(what we’ve been referring to as <em>X</em>).</p>
+<p>So, what about TDX and web3? How does the above apply to our
+domain?</p>
+<h1 id="re-isa-on-tdx"><strong>RE; ISA on TDX</strong></h1>
+<p>As I mentioned when talking about SGX, TDX can generally be
+considered to have a smaller attack surface than SGX simply because the
+host/guest duality is completely different due to the underlying design
+of each of these technologies.</p>
+<blockquote>
+<p>NB: I cover SGX/TDX but this applies for enclaves/VMs in general.</p>
+</blockquote>
+<p>That said, we do indeed expose interface for our trusted domains as
+well, it’s just being done differently.</p>
+<p>While we cannot observe ECALLs/OCALLs or alike instructions (they
+don’t exist) we can observe the TD VMs boundaries since those are
+ultimately on the host. Mainly we can focus on VM state and I/O.</p>
+<p><strong>VM state</strong>. we can monitor vm state like vcpu entry,
+exit on TDG.VP.VMCALL (and re-entry) although these are much less
+informative than ecalls/ocalls on sgx due to the difference in the
+development workflow around how the host/guest duality works.</p>
+<p><strong>I/O.</strong> If you’re familiar with how the TDX base module
+deals with I/O you know that the guest can rely on (i)
+paravirtualization (ii) directly assigning devices to the TD and that it
+is the VMM/hypervisor (i.e., the td provider) that provides I/O to the
+guest and where safety must be ensured guest side (e.g., through
+encryption). This means that I/O does indeed cross TD boundaries.
+Paravirtualization which is becoming the most used approach by the VMM
+to provision I/O basically enables the TD to use devices that are owned
+and managed by the hypervisor through a VMCALL function. Disk I/O
+access, and network I/O (including calls to the quoting enclave) are
+exposed to the untrusted host which is the reason why we either seal or
+sign data that exits the TD boundaries.</p>
+<p>For example, if you look at the <a
+href="https://github.com/Dstack-TEE/dstack/blob/master/vmm/src/app/qemu.rs#L335">dstack
+qemu configuration function</a>, you can see that the host is
+instrumented with access (only covering some of the interesting parts
+here not all boundaries that are being crossed) to (i) disk I/O on
+rootfs (readonly), the virtual hard disk and the shared folder (ii)
+virtio-net so host captures all guest egress (iii) vsock for the quoting
+enclave comms (iv) vm entries, exits, re-entry (v) page access
+patterns.</p>
+<p>Of course, this is all <em>fine and expected</em> as long as the
+guest correctly deals with encryption (as dstack does! it has also been
+audited) but it means that we do have an exposure of the interfaces, and
+actually TDX leaks more than SGX in certain domains, e.g., still leaking
+page faults to the VMM while running a whole VM means more pages so
+increased risk.</p>
+<p>I haven’t directly conducted an interface attack myself but am
+interested in spinning up a TDX capable machine and experiment with it
+myself if I even have the time, but especially in I/O intensive
+<em>f</em> like P2P networks (just like <a
+href="https://x.com/@Tplus_cx"><span class="citation"
+data-cites="Tplus_cx">@Tplus_cx</span></a>) the information leakage is a
+very feasible attack surface and we might need to employ software-level
+protections like code obfuscation to shield confidentiality. Also happy
+to collaborate on this!</p>
+<h1 id="exploring-impact-on-web3tee"><strong>Exploring Impact On
+Web3&lt;&gt;TEE</strong></h1>
+<p>As hinted by the title, there are multiple downstream effects in
+being able to probabilistically infer a subset of the secrets that our
+software <em>f</em> uses; (i) domain reduction for secrets (ii)
+undermining confidentiality on the users’ data which can ultimately lead
+to a much degraded level of censorship resistance against the servers’
+operators. Assuming that we work with TDX like most web3 TEE projects,
+since for (i) the attacker would only be able to reduce search domain
+for the bruteforce for application specific secrets (e.g., you can’t
+side-channel the attestation key as you can try to by interposing the
+ddr5) and the timing would be heavily nested among other vm calls so
+lots of noise we ignore this as a direct threat (can still be one just
+needs more thoughts and research) and focus on the censorship resistance
+(CR) layer.</p>
+<h1 id="re-crisa"><strong>RE; CR&lt;&gt;ISA</strong></h1>
+<p>If you are familiar with the common topics in the web3 &lt;&gt; TEEs
+intersection you’ll likely notice that this whole ISA workflow can be
+directly applied to undermine censorship resistance against the servers’
+operators on the networking end of things.</p>
+<p>The theory is simple, if we can probabilistically determine
+<em>s(e(X))</em> for a subset <em>X</em> of the whole VM traffic and
+infer <em>S</em> as a result of analyzing behavior <em>f(X, S)</em>,
+then during exploit phase we can have higher probability of identifying
+unique traffic patterns which means that the assumption that censorship
+cannot be selectively carried by an operator (e.g., depending on message
+type, user type, user, etc) is not entirely valid anymore and we need to
+employ strong obfuscation techniques on both the spatial and
+temporal/control-flow dimensions.</p>
+<p>This is concerning especially for two reasons:</p>
+<ol type="1">
+<li><strong>selective censorship is particularly powerful in a TEE
+infrastructure.</strong> (i) most protocols will follow a leader-based
+approach (ii) the set of the possible leaders is much lower than what it
+would be on a non TEE-shielded network (iii) generally tee based
+protocols won’t force any sort of game theoretical equilibrium for nodes
+to behave correctly (e.g., incentives to follow rules and censor a
+certain action aren’t calibrated against the potential reward to
+misbehave. This might actually be easier to mitigate in TEEs since it’s
+less likely that they would virtualize internally and execute arbitrary
+code thus calibrating equilibrium feels theoretically easier). Tackling
+censorship is a widespread concern in all decentralized systems, but
+TEEs optimizing for smaller quorums and more reliance on the leader’s
+integrity make the job more difficult since larger validator set and
+stronger consensus rules help a lot and we can’t rely on those without
+changing the protocol’s assumptions and performance advantages we
+introduce with TEEs (safety advantages are conserved tho).</li>
+<li><strong>economic security argument doesn’t hold</strong>. Currently,
+one would discard doing a physical attack only to carry out selective
+censorship because the math doesn’t add up for a rational attacker in
+terms of rewards in comparison to the cost-of-attack. If physical access
+isn’t required and the attacker just requires user-space access then the
+cost to attack drops dramatically so we can’t rely on this argument
+anymore.</li>
+</ol>
+<p>Due to 1, detecting such censorship is much more complex than
+detecting generic liveness faults thus we need to fall back to either
+mitigating selective censorship at software level or have stronger CR
+rules at protocol p2p layer; or both to have an overall stronger
+protocol. In fact, combining the two likely yields the best results and
+also allows to create easier expectations around what each task must
+achieve: CR rules at protocol level can be <strong>much more
+effective</strong> if selective censorship success <strong>probability
+is lowered</strong> and the <strong>granularity is reduced</strong>. CR
+rules at protocol level are for another post (and tho it’s an
+ever-evolving topic I have already written about this before in a <a
+href="https://heytdep.github.io/post/33/post.html">couple</a> of <a
+href="https://heytdep.github.io/post/30/post.html">occasions</a>) but we
+can explore some of the mitigations to make selective censorship less
+powerful.</p>
+<p>Before getting into the mitigations though, remember when I mentioned
+above I wanted to personally carry out an ISA on TDX software? The scope
+of the work would in fact be mostly proving that selective censorship is
+possible for a near-zero attack cost on a P2P TEE solution and
+potentially exploring edge cases where secrets that undermine integrity
+safety can be inferred (e.g., making brute-force attack on application
+secrets feasible). As a sub-category of proving censorship feasibility I
+believe it would be incredibly interesting to <em>potentially</em>
+correlate granularity in the censorship filter to the attack complexity
+and different common code patterns.</p>
+<h1 id="applicable-mitigations"><strong>Applicable
+Mitigations</strong></h1>
+<p>The theory around what needs to be mitigated for interface-related
+leakage doesn’t differ between technologies thus we can reuse SGX’s
+approach.</p>
+<p><strong>spatial dimension</strong>. This is not new in TEE CR
+discourse, some topics from e.g., flashbots already propose
+constant-size wrappers for ingress/egress VM data that is exposed to the
+host. If we can pad the input data before it goes through the sealing
+function then we’re not exposing any information about how the trusted
+domain should process or has processed a certain instruction by just
+looking at the tls payload size. This is honestly fairly
+straightforward, e.g., if I’m running an exchange and I don’t want an
+operator to be able to only censor cancel orders during a high vol
+market knowing the difference in payload between create orders and
+cancel orders I can easily censor the latter. With a constant size
+wrapper here I wouldn’t be able to distinguish between the two.</p>
+<p><strong>temporal &amp; control flow dimension.</strong> This is the
+overlooked topic in my opinion. Since TDX also leaks I/O patterns thus
+timing to the VMM any call to block space or a networking hook from the
+trusted domain can be interposed. If in <em>f(X, S)</em> these calls
+execute under different conditions and branches that affect clock times
+depending on {<em>X, S}</em> then a sophisticated attacker can infer at
+least a subset of <em>S</em> that they can then use to carry out
+censorship. To mitigate this our sensitive TD code should employ branch
+obfuscation and loop obfuscation. <strong>Branch obfuscation;</strong>
+needs to make sure it’s side-channel free (e.g., as researchers pointed
+in the paper I mentioned before one could add the instructions of the
+paths to the “counter-path”, i.e., path A: a() and path B: b() we modify
+A: a() + b() and B: a() + b() so both paths are sequentially executed)
+while still being correct in the program execution (e.g., make nop the
+decoy instructions). <strong>Loop obfuscation</strong>; needs to make
+sure that we cannot determine the actual loops count since it being
+potentially dependent <em>{X, S}</em> means that we could infer valuable
+info about S. So you first want to identify loops where bounds depend on
+secret values (e.g., an early exit driven by <em>s_i</em> if <em>s_i
+S</em> ). If we modify such loops which initially ran <em>i</em> times
+to count up to <em>L &gt; t</em> and then during L-t extra iterations do
+the decoy work it’s difficult for an attacker to infer how much the real
+workflow actually ran.</p>
+<h1 id="conclusion"><strong>Conclusion</strong></h1>
+<p>I hope this didn’t come across as bad news for us teams working on
+TEEs, because it isn’t; it simply means we need to be careful in how
+we’re writing our code and designing our architecture.</p>
+<p>As <span class="citation" data-cites="gf_256">@gf_256</span> put it -
+these attack vectors are normally a “skill issue” - make sure you and
+your auditors are familiar with them.</p>
+<p>Considering we’re pushing in our protocols a technology that enables
+us to go faster while sacrificing robustness (especially around liveness
+safety) it’s crucial that we thoroughly look into the security
+implications of such performance gain, and the good news here is that
+this issue can be easily solved even if it is indeed very specific to
+your <em>f</em>. But that’s fine, not all protocols require the same
+degree of censorship resistance and applications (especially TD vms)
+aren’t directly subject to inferring secrets through such technique due
+to how low-resolution the data for <em>X</em> thus <em>Y</em> as well
+would be.</p>

@@ -1,0 +1,94 @@
+<p><code>8 sept 2022</code></p>
+<h1 id="introduction">Introduction</h1>
+<p>Due to WASM’s memory model, passing arrays (and nested arrays) might
+reveal to be quite a challenge if you’re trying to do things
+securely.</p>
+<p>However, we luckily have the (and ) crates that provide us a friendly
+interface to work on when exchanging data. I should also mention that
+whenever you are working with WebAssembly, you should always try to
+avoid exchanging data between JS and your WASM binary if you are
+developing with performance as one of your goals.</p>
+<p>Wasm functions take and return scalar values as an . Luckily helps
+with a lot of stuff, but it doesn’t do everything. Generally, we want
+WASM to work with heavy computations, query and work with the data in
+its own linear memory and only return small amounts of data.</p>
+<p>Anyways, let’s take a look at how you can pass (or return) arrays
+using the type.</p>
+<h1 id="the-cargo.toml">The Cargo.toml</h1>
+<p>We have to add to our dependencies (and if you don’t have it
+already):</p>
+<pre><code>wasm-bindgen = &quot;0.2.82&quot;
+js-sys = &quot;0.3.59&quot;</code></pre>
+<h1 id="receiving-arrays-as-fn-parameters">Receiving arrays as fn
+parameters</h1>
+<p>I have a function from my <a
+href="https://github.com/heytdep/wasm-groth16-verifier">wasm-groth16-verifier</a>
+crate, the function takes 9 arrays as params, so we can use the type and
+infer it as type for our 9 paramaters:</p>
+<pre><code>  #[wasm_bindgen]
+pub fn verify_external(
+    vk_a: Array,
+    vk_b: Array,
+    vk_g: Array,
+    vk_d: Array,
+    vk_g_abc: Array,
+    p_a: Array,
+    p_b: Array,
+    p_c: Array,
+    pub_f: Array,
+) -&gt; bool</code></pre>
+<p>Now, I know the lenght of all arrays but one, the , as you might
+guess, this will be the array causing the most headache, that is because
+the array will be transformed into a nested array looking like this: and
+the lenght of the array can vary and the type has no implementation for
+working with nested arrays, every element of the array is the same,
+regarldess if it’s a string or an array. I’ve decided to manually split
+the input array which will look like this into . The algorithm to do so
+is simple and I’ve implemented it as follows (it might not be
+optimized):</p>
+<pre><code>  let mut abc_vec: Vec&lt;[String; 2]&gt; = Vec::new();
+  let mut iters = 0;
+  let mut i = 1;
+  for _ in 0..vk_g_abc.length() {
+    if i != 2 {
+      i += 1;
+    } else {
+      if iters &gt; 0 {
+        iters += 1;
+        abc_vec.push([
+          vk_g_abc.get(iters + (iters - 2)).as_string().unwrap(),
+          vk_g_abc.get(iters + (iters - 2) + 1).as_string().unwrap(),
+        ]);
+        i = 1;
+      } else {
+        iters += 1;
+        abc_vec.push([
+          vk_g_abc.get(iters * (i - 2)).as_string().unwrap(),
+          vk_g_abc.get(iters * (i - 1)).as_string().unwrap(),
+        ]);
+        i = 1;
+      }
+    }
+  }</code></pre>
+<p>The loop has to build a new array of two string types and push it to
+the main array every two .</p>
+<p>You can also see here that we get the elements of the array with .
+For arrays where I already know the length and indexes of the elements
+as well, I’ve simply built the nested tuples like this:</p>
+<pre><code>  (
+  [
+    &amp;vk_b.get(0).as_string().unwrap(),
+    &amp;vk_b.get(1).as_string().unwrap(),
+  ],
+  [
+    &amp;vk_b.get(2).as_string().unwrap(),
+    &amp;vk_b.get(3).as_string().unwrap(),
+  ],
+  ),</code></pre>
+<p>As you can see, we haven’t really received nested arrays, but this
+shows how you can easily go from a non-nested fixed or non fixed-length
+array, into a nested one.</p>
+<p>You can look at the js demo of passing arrays to WASM of this
+specific use-case at <a
+href="https://heytdep.github.io/wasm-groth16-verifier"
+class="uri">https://heytdep.github.io/wasm-groth16-verifier</a>.</p>

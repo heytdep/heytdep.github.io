@@ -1,0 +1,305 @@
+<h1
+id="building-and-using-signatures-in-futurenetlocal-networks-for-the-advanced-auth-script-for-building-signatures">Building
+and using signatures in Futurenet/Local Networks for the advanced auth +
+Script for building signatures</h1>
+<blockquote>
+<p>Before you read this, I recommend reading the <a
+href="https://github.com/stellar/sorobanathon/discussions/38">previous
+submission</a> if you don’t yet know the basics of using the CLI and
+Futurenet/Local Network.</p>
+</blockquote>
+<h1 id="introduction">Introduction</h1>
+<p>The advanced auth mechanism is a key compoment for smart contracts
+that rely on the user’s authorization to do something. For example, when
+calling the <code>xfer</code> fn, the token contract relies on the fact
+that the user transferring money out of their balance has given the
+authorization to the contract to do so. In our <a
+href="https://github.com/stellar/sorobanathon/discussions/38">previous
+sorobanathon submission</a> we wrote about using
+<code>Signature::Invoker</code>, but there are also situations where the
+user doesn’t invoke the contract direclty. For example, if we where to
+invoke the <code>xfer</code> fn from a contract (contract A), we would
+need the user to provide a signature which contract A would then pass to
+the token contract. In this post, we’ll talk about building signatures
+and how to pass them to a contract. I (<span class="citation"
+data-cites="heytdep">@heytdep</span>) have also written <a
+href="https://github.com/Xycloo/soroban-build-signatures/blob/main/src/main.rs">a
+tool to build signatures</a> given a stellar keypair, action symbol,
+contract, and arguments. We will use this script to build the signatures
+for this post.</p>
+<h1 id="understanding-ed25519-signatures">Understanding ed25519
+signatures</h1>
+<p>Ed25519 signatures are the product of signing a message (Payload)
+with an ed25519 keypair. Since signatures are exposed to external
+observers, the payload they contain must be very specific to the action
+they are allowing a contract to perform in order to not allow attackers
+to re-use these signatures. For example, if we provide a signature for
+the <code>xfer</code> fn, the payload contains 3 “sections”: - the id of
+contract that is allowed to perform the <code>xfer</code> on behalf of
+the user. - the name of the action that is performed
+(<code>symbol!("xfer")</code>). - custom arguments, like who is going to
+receive the token, how much, and the nonce of the user (to prevent
+re-playing the same signature).</p>
+<p>We also have to rember that we need the environment in which we are
+building the signature to have a network passphrase matching the
+passphrase of the network we want to use this signature in.</p>
+<p>All of this needs to be signed by a keypair, performed by the
+<code>soroban_auth::testutils::ed25519::sign</code> function:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> sig <span class="op">=</span> <span class="pp">soroban_auth::testutils::ed25519::</span>sign(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>kp<span class="op">,</span> <span class="op">&amp;</span>contract_id<span class="op">,</span> action<span class="op">,</span> args)<span class="op">;</span></span></code></pre></div>
+<h1 id="building-keypairs">Building keypairs</h1>
+<p>There currently isn’t a way of creating ed25519 keypairs in the auth
+sdk, so we’ll have to create it on our own. Fortunately, you can use the
+script I mentioned before:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> main() <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> env <span class="op">=</span> build_env(<span class="st">&quot;Standalone Network ; February 2017&quot;</span><span class="op">.</span>to_string())<span class="op">;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> public_encoded <span class="op">=</span> <span class="st">&quot;GA63NQJB6SXHDVOI3NXP4GM3K5MB4KLTX6R4YK2KKXY4DM27ZNUOVJYY&quot;</span><span class="op">.</span>to_string()<span class="op">;</span> <span class="co">// this a test keypair that doesn&#39;t hold any value, you should never use this specific keypair since it may put your account&#39;s balance at risk.</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> secret_encoded <span class="op">=</span> <span class="st">&quot;SC2ZVG244UNKKBEKAQLEFAS2AU4XGEX5TXCXBTJZ6DXVU5MJ4E4FRKF4&quot;</span><span class="op">.</span>to_string()<span class="op">;</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> (kp_id<span class="op">,</span> kp) <span class="op">=</span> <span class="pp">ed25519_utils::</span>build_kp(</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>decode_pub(public_encoded)<span class="op">,</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>decode_secret(secret_encoded)<span class="op">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span></span></code></pre></div>
+<p>As you can see, we build the keypair (<code>kp</code>) with the
+<code>build_kp</code> fn, which accepts as arguments the strdecoded
+value of both the public and secret stellar keys.</p>
+<h1 id="building-the-signature">Building the Signature</h1>
+<p>Once we have built our keypair, we are ready to sign a payload:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> main() <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> env <span class="op">=</span> build_env(<span class="st">&quot;Standalone Network ; February 2017&quot;</span><span class="op">.</span>to_string())<span class="op">;</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> public_encoded <span class="op">=</span> <span class="st">&quot;GA63NQJB6SXHDVOI3NXP4GM3K5MB4KLTX6R4YK2KKXY4DM27ZNUOVJYY&quot;</span><span class="op">.</span>to_string()<span class="op">;</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> secret_encoded <span class="op">=</span> <span class="st">&quot;SC2ZVG244UNKKBEKAQLEFAS2AU4XGEX5TXCXBTJZ6DXVU5MJ4E4FRKF4&quot;</span><span class="op">.</span>to_string()<span class="op">;</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> (kp_id<span class="op">,</span> kp) <span class="op">=</span> <span class="pp">ed25519_utils::</span>build_kp(</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>decode_pub(public_encoded)<span class="op">,</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>decode_secret(secret_encoded)<span class="op">,</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> contract_id <span class="op">=</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>        <span class="pp">bytesn!</span>(<span class="op">&amp;</span>env<span class="op">,</span> <span class="dv">0x69f7e580340b3f963e56a40a11a4bc89264b53583fc92e65ef44efd051ab5a9b</span>)<span class="op">;</span> <span class="co">// contract that can use this signature</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> action <span class="op">=</span> <span class="pp">symbol!</span>(<span class="st">&quot;change&quot;</span>)<span class="op">;</span> <span class="co">// action</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> args <span class="op">=</span> ()<span class="op">;</span> <span class="co">// args, since there is not measure to prevent re-playing this signature is insecure</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> sig <span class="op">=</span> <span class="pp">soroban_auth::testutils::ed25519::</span>sign(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>kp<span class="op">,</span> <span class="op">&amp;</span>contract_id<span class="op">,</span> action<span class="op">,</span> args)<span class="op">;</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>    <span class="pp">std::println!</span>(<span class="st">&quot;{:?}&quot;</span><span class="op">,</span> sig)<span class="op">;</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>This will output the following signature:</p>
+<pre><code>Ed25519(Ed25519Signature { public_key: BytesN&lt;32&gt;(61, 182, 193, 33, 244, 174, 113, 213, 200, 219, 110, 254, 25, 155, 87, 88, 30, 41, 115, 191, 163, 204, 43, 74, 85, 241, 193, 179, 95, 203, 104, 234), signature: BytesN&lt;64&gt;(18, 121, 165, 102, 188, 133, 109, 43, 68, 70, 121, 63, 136, 175, 143, 101, 140, 147, 75, 248, 123, 132, 174, 49, 89, 56, 147, 230, 180, 30, 90, 45, 1, 206, 179, 48, 195, 170, 86, 67, 224, 39, 151, 217, 84, 253, 99, 111, 171, 219, 162, 151, 201, 150, 191, 130, 85, 140, 3, 240, 95, 171, 170, 7) })</code></pre>
+<p>We can now use this signature in a contract that needs to verify
+<code>verify(&amp;e, &amp;sig, symbol!("change"), ());</code>. So a
+contract that needs to verify that the user has a signature for the
+<code>"change"</code> action. Again, this is an insecure signature, to
+make it secure you simply need to add a couple of params when using the
+<code>verify</code> fn, for example, to make it secure we could use
+something like
+<code>verify(&amp;e, &amp;sig, symbol!("change"), (key, value, nonce));</code>,
+where the nonce is relative to a user and is stored in the contract’s
+data.</p>
+<h1 id="writing-the-contract">Writing the contract</h1>
+<p>Let’s write a very simple contract that verifies a certain signature
+(note that we have a <code>Signature</code> argument:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="at">#![</span>no_std<span class="at">]</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_auth::</span><span class="op">{</span>verify<span class="op">,</span> Ed25519Signature<span class="op">,</span> Identifier<span class="op">,</span> Signature<span class="op">};</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_sdk::</span><span class="op">{</span>contractimpl<span class="op">,</span> contracttype<span class="op">,</span> symbol<span class="op">,</span> BigInt<span class="op">,</span> Bytes<span class="op">,</span> Env<span class="op">};</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> ExampleContract<span class="op">;</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> DataKey <span class="op">{</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    Nonce(Identifier)<span class="op">,</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> ExampleContract <span class="op">{</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> test_sig(e<span class="op">:</span> Env<span class="op">,</span> sig<span class="op">:</span> Signature<span class="op">,</span> key<span class="op">:</span> Bytes<span class="op">,</span> val<span class="op">:</span> Bytes) <span class="op">{</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> nonce <span class="op">=</span> get_nonce(<span class="op">&amp;</span>e<span class="op">,</span> sig<span class="op">.</span>identifier(<span class="op">&amp;</span>e))<span class="op">;</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>        verify(<span class="op">&amp;</span>e<span class="op">,</span> <span class="op">&amp;</span>sig<span class="op">,</span> <span class="pp">symbol!</span>(<span class="st">&quot;change&quot;</span>)<span class="op">,</span> (key<span class="op">,</span> val<span class="op">,</span> nonce<span class="op">.</span>clone()))<span class="op">;</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>        e<span class="op">.</span>data()<span class="op">.</span>set(<span class="pp">DataKey::</span>Nonce(sig<span class="op">.</span>identifier(<span class="op">&amp;</span>e))<span class="op">,</span> nonce <span class="op">+</span> <span class="dv">1</span>)</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> get(e<span class="op">:</span> Env<span class="op">,</span> key<span class="op">:</span> Bytes) <span class="op">-&gt;</span> Identifier <span class="op">{</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>        e<span class="op">.</span>data()</span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>get(key)</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>unwrap_or_else(<span class="op">||</span> <span class="pp">panic!</span>(<span class="st">&quot;Key does not exist&quot;</span>))</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>unwrap()</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> nonce(e<span class="op">:</span> Env<span class="op">,</span> id<span class="op">:</span> Identifier) <span class="op">-&gt;</span> BigInt <span class="op">{</span></span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>        get_nonce(<span class="op">&amp;</span>e<span class="op">,</span> id)</span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> get_nonce(e<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> id<span class="op">:</span> Identifier) <span class="op">-&gt;</span> BigInt <span class="op">{</span></span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>    e<span class="op">.</span>data()</span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>get(<span class="pp">DataKey::</span>Nonce(id))</span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>unwrap_or_else(<span class="op">||</span> <span class="cn">Ok</span>(<span class="pp">BigInt::</span>zero(e)))</span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>        <span class="op">.</span>unwrap()</span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>cfg<span class="at">(</span>test<span class="at">)]</span></span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a><span class="kw">mod</span> test<span class="op">;</span></span></code></pre></div>
+<p>A successful test looks like this:</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="kw">crate</span><span class="pp">::</span><span class="op">{</span>ExampleContract<span class="op">,</span> ExampleContractClient<span class="op">};</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_auth::</span>Signature<span class="op">;</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_sdk::</span><span class="op">{</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    bytes<span class="op">,</span> bytesn<span class="op">,</span> symbol<span class="op">,</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    <span class="pp">testutils::</span><span class="op">{</span>Ledger<span class="op">,</span> LedgerInfo<span class="op">},</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    BigInt<span class="op">,</span> Env<span class="op">,</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="kw">extern</span> <span class="kw">crate</span> std<span class="op">;</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>test<span class="at">]</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> test_use_advanced_auth() <span class="op">{</span></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> e <span class="op">=</span> <span class="pp">Env::</span><span class="kw">default</span>()<span class="op">;</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    e<span class="op">.</span>ledger()<span class="op">.</span>set(LedgerInfo <span class="op">{</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>        timestamp<span class="op">:</span> <span class="dv">1668106305</span><span class="op">,</span></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>        protocol_version<span class="op">:</span> <span class="dv">20</span><span class="op">,</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>        sequence_number<span class="op">:</span> <span class="dv">10</span><span class="op">,</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>        network_passphrase<span class="op">:</span> <span class="pp">std::vec!</span>[</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>            <span class="dv">83</span><span class="op">,</span> <span class="dv">116</span><span class="op">,</span> <span class="dv">97</span><span class="op">,</span> <span class="dv">110</span><span class="op">,</span> <span class="dv">100</span><span class="op">,</span> <span class="dv">97</span><span class="op">,</span> <span class="dv">108</span><span class="op">,</span> <span class="dv">111</span><span class="op">,</span> <span class="dv">110</span><span class="op">,</span> <span class="dv">101</span><span class="op">,</span> <span class="dv">32</span><span class="op">,</span> <span class="dv">78</span><span class="op">,</span> <span class="dv">101</span><span class="op">,</span> <span class="dv">116</span><span class="op">,</span> <span class="dv">119</span><span class="op">,</span> <span class="dv">111</span><span class="op">,</span> <span class="dv">114</span><span class="op">,</span> <span class="dv">107</span><span class="op">,</span></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>            <span class="dv">32</span><span class="op">,</span> <span class="dv">59</span><span class="op">,</span> <span class="dv">32</span><span class="op">,</span> <span class="dv">70</span><span class="op">,</span> <span class="dv">101</span><span class="op">,</span> <span class="dv">98</span><span class="op">,</span> <span class="dv">114</span><span class="op">,</span> <span class="dv">117</span><span class="op">,</span> <span class="dv">97</span><span class="op">,</span> <span class="dv">114</span><span class="op">,</span> <span class="dv">121</span><span class="op">,</span> <span class="dv">32</span><span class="op">,</span> <span class="dv">50</span><span class="op">,</span> <span class="dv">48</span><span class="op">,</span> <span class="dv">49</span><span class="op">,</span> <span class="dv">55</span><span class="op">,</span></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>        ]<span class="op">,</span></span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>        base_reserve<span class="op">:</span> <span class="dv">10</span><span class="op">,</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span>)<span class="op">;</span></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> (user_1_id<span class="op">,</span> user_1_sign) <span class="op">=</span> <span class="pp">soroban_auth::testutils::ed25519::</span>generate(<span class="op">&amp;</span>e)<span class="op">;</span></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> contract_id <span class="op">=</span> e<span class="op">.</span>register_contract(</span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="pp">std::option::</span><span class="dt">Option</span><span class="pp">::</span><span class="cn">Some</span>(</span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>            <span class="pp">bytesn!</span>(<span class="op">&amp;</span>e<span class="op">,</span> <span class="dv">0x69f7e580340b3f963e56a40a11a4bc89264b53583fc92e65ef44efd051ab5a9b</span>)<span class="op">,</span></span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>        )<span class="op">,</span></span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a>        ExampleContract<span class="op">,</span></span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> client <span class="op">=</span> <span class="pp">ExampleContractClient::</span>new(<span class="op">&amp;</span>e<span class="op">,</span> <span class="op">&amp;</span>contract_id)<span class="op">;</span></span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> nonce <span class="op">=</span> <span class="pp">BigInt::</span>from_u32(<span class="op">&amp;</span>e<span class="op">,</span> <span class="dv">0</span>)<span class="op">;</span></span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> sig <span class="op">=</span> <span class="pp">soroban_auth::testutils::ed25519::</span>sign(</span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>e<span class="op">,</span></span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>user_1_sign<span class="op">,</span></span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>contract_id<span class="op">,</span></span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a>        <span class="pp">symbol!</span>(<span class="st">&quot;change&quot;</span>)<span class="op">,</span></span>
+<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a>        (<span class="pp">bytes!</span>(<span class="op">&amp;</span>e<span class="op">,</span> <span class="dv">0x7</span>)<span class="op">,</span> <span class="pp">bytes!</span>(<span class="op">&amp;</span>e<span class="op">,</span> <span class="dv">0x7</span>)<span class="op">,</span> nonce)<span class="op">,</span></span>
+<span id="cb6-43"><a href="#cb6-43" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-45"><a href="#cb6-45" aria-hidden="true" tabindex="-1"></a>    <span class="co">//    std::println!(&quot;{:?}&quot;, sig);</span></span>
+<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-47"><a href="#cb6-47" aria-hidden="true" tabindex="-1"></a>    client<span class="op">.</span>test_sig(<span class="op">&amp;</span>sig<span class="op">,</span> <span class="op">&amp;</span><span class="pp">bytes!</span>(<span class="op">&amp;</span>e<span class="op">,</span> <span class="dv">0x7</span>)<span class="op">,</span> <span class="op">&amp;</span><span class="pp">bytes!</span>(<span class="op">&amp;</span>e<span class="op">,</span> <span class="dv">0x7</span>))<span class="op">;</span></span>
+<span id="cb6-48"><a href="#cb6-48" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h1 id="replicating-the-behaviour-on-futurenetlocal-network">Replicating
+the behaviour on Futurenet/Local Network</h1>
+<p>First, we build the wasm binary of the contract:</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cargo</span> +nightly build <span class="dt">\ </span> </span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="ex">--target</span> wasm32-unknown-unknown <span class="dt">\</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--release</span> <span class="dt">\</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">-Z</span> build-std=std,panic_abort <span class="dt">\</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">-Z</span> build-std-features=panic_immediate_abort</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    <span class="ex">Finished</span> release <span class="pp">[</span><span class="ss">optimized</span><span class="pp">]</span> target<span class="er">(</span><span class="ex">s</span><span class="kw">)</span> <span class="er">in</span> <span class="ex">0.05s</span></span></code></pre></div>
+<p>Then we deploy it:</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">soroban</span> deploy <span class="dt">\</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--wasm</span> target/wasm32-unknown-unknown/release/test_soroban_cli_futurenet.wasm <span class="at">--secret-key</span> DEPLOYER_SECRET <span class="at">--rpc-url</span> http://HOST_INSTANCE:8000/soroban/rpc <span class="at">--network-passphrase</span> <span class="st">&#39;Standalone Network ; February 2017&#39;</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="ex">out:</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="ex">success</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="ex">9c17051a8d43f2e1e062e69980df8b41ebbf55a50065daee59c8b7a4720b10f8</span></span></code></pre></div>
+<p>Now that we have the contract ID we can invoke it. But before we need
+to build a valid signature:</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> main() <span class="op">{</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> env <span class="op">=</span> build_env(<span class="st">&quot;Standalone Network ; February 2017&quot;</span><span class="op">.</span>to_string())<span class="op">;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> public_encoded <span class="op">=</span> <span class="st">&quot;GA63NQJB6SXHDVOI3NXP4GM3K5MB4KLTX6R4YK2KKXY4DM27ZNUOVJYY&quot;</span><span class="op">.</span>to_string()<span class="op">;</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> secret_encoded <span class="op">=</span> <span class="st">&quot;SC2ZVG244UNKKBEKAQLEFAS2AU4XGEX5TXCXBTJZ6DXVU5MJ4E4FRKF4&quot;</span><span class="op">.</span>to_string()<span class="op">;</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> (kp_id<span class="op">,</span> kp) <span class="op">=</span> <span class="pp">ed25519_utils::</span>build_kp(</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>env<span class="op">,</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>decode_pub(public_encoded)<span class="op">,</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span>decode_secret(secret_encoded)<span class="op">,</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> contract_id <span class="op">=</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>        <span class="pp">bytesn!</span>(<span class="op">&amp;</span>env<span class="op">,</span> <span class="dv">0x9c17051a8d43f2e1e062e69980df8b41ebbf55a50065daee59c8b7a4720b10f8</span>)<span class="op">;</span></span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> action <span class="op">=</span> <span class="pp">symbol!</span>(<span class="st">&quot;change&quot;</span>)<span class="op">;</span></span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> args <span class="op">=</span> (</span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>        <span class="pp">bytes!</span>(<span class="op">&amp;</span>env<span class="op">,</span> <span class="dv">0x68656c6c6f</span>)<span class="op">,</span> <span class="co">// hex for &quot;Hello&quot;</span></span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>        <span class="pp">bytes!</span>(<span class="op">&amp;</span>env<span class="op">,</span> <span class="dv">0x68656c6c6f</span>)<span class="op">,</span></span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>        <span class="pp">BigInt::</span>zero(<span class="op">&amp;</span>env)<span class="op">,</span></span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a>    )<span class="op">;</span></span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> sig <span class="op">=</span> <span class="pp">soroban_auth::testutils::ed25519::</span>sign(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>kp<span class="op">,</span> <span class="op">&amp;</span>contract_id<span class="op">,</span> action<span class="op">,</span> args)<span class="op">;</span></span>
+<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>    <span class="pp">std::println!</span>(<span class="st">&quot;{:?}&quot;</span><span class="op">,</span> sig)<span class="op">;</span></span>
+<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>We now have:</p>
+<pre><code>Ed25519(Ed25519Signature { public_key: BytesN&lt;32&gt;(61, 182, 193, 33, 244, 174, 113, 213, 200, 219, 110, 254, 25, 155, 87, 88, 30, 41, 115, 191, 163, 204, 43, 74, 85, 241, 193, 179, 95, 203, 104, 234), signature: BytesN&lt;64&gt;(80, 243, 125, 109, 171, 229, 144, 33, 237, 137, 67, 51, 145, 226, 27, 220, 108, 115, 33, 105, 164, 252, 164, 10, 138, 189, 216, 158, 36, 184, 129, 188, 86, 138, 46, 219, 103, 34, 185, 42, 97, 233, 238, 184, 231, 115, 182, 193, 211, 8, 164, 222, 196, 27, 30, 255, 200, 236, 179, 211, 250, 107, 123, 10) })</code></pre>
+<p>We have to convert both the public_key and signature bytes to a hex
+string, we can do it with <a
+href="https://go.dev/play/p/uxOTa6cuPeI">this go script</a>.</p>
+<p>Then according to the structure of the <code>Ed25519Signature</code>
+(<code>Ed25519Signature { public_key: Bytes, signature: Bytes }</code>)
+struct, we build the JSON that we can pass as the signature
+argument:</p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;object&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;vec&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;symbol&quot;</span><span class="fu">:</span> <span class="st">&quot;Ed25519&quot;</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;object&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;map&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>            <span class="fu">{</span></span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;key&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;symbol&quot;</span><span class="fu">:</span> <span class="st">&quot;public_key&quot;</span></span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>              <span class="fu">},</span></span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;val&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;object&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a>                  <span class="dt">&quot;bytes&quot;</span><span class="fu">:</span> <span class="st">&quot;3db6c121f4ae71d5c8db6efe199b57581e2973bfa3cc2b4a55f1c1b35fcb68ea&quot;</span></span>
+<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>                <span class="fu">}</span></span>
+<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a>              <span class="fu">}</span></span>
+<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a>            <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb11-20"><a href="#cb11-20" aria-hidden="true" tabindex="-1"></a>            <span class="fu">{</span></span>
+<span id="cb11-21"><a href="#cb11-21" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;key&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-22"><a href="#cb11-22" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;symbol&quot;</span><span class="fu">:</span> <span class="st">&quot;signature&quot;</span></span>
+<span id="cb11-23"><a href="#cb11-23" aria-hidden="true" tabindex="-1"></a>              <span class="fu">},</span></span>
+<span id="cb11-24"><a href="#cb11-24" aria-hidden="true" tabindex="-1"></a>              <span class="dt">&quot;val&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-25"><a href="#cb11-25" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;object&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb11-26"><a href="#cb11-26" aria-hidden="true" tabindex="-1"></a>                  <span class="dt">&quot;bytes&quot;</span><span class="fu">:</span> <span class="st">&quot;50f37d6dabe59021ed89433391e21bdc6c732169a4fca40a8abdd89e24b881bc568a2edb6722b92a61e9eeb8e773b6c1d308a4dec41b1effc8ecb3d3fa6b7b0a&quot;</span></span>
+<span id="cb11-27"><a href="#cb11-27" aria-hidden="true" tabindex="-1"></a>                <span class="fu">}</span></span>
+<span id="cb11-28"><a href="#cb11-28" aria-hidden="true" tabindex="-1"></a>              <span class="fu">}</span></span>
+<span id="cb11-29"><a href="#cb11-29" aria-hidden="true" tabindex="-1"></a>            <span class="fu">}</span></span>
+<span id="cb11-30"><a href="#cb11-30" aria-hidden="true" tabindex="-1"></a>          <span class="ot">]</span></span>
+<span id="cb11-31"><a href="#cb11-31" aria-hidden="true" tabindex="-1"></a>        <span class="fu">}</span></span>
+<span id="cb11-32"><a href="#cb11-32" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb11-33"><a href="#cb11-33" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="cb11-34"><a href="#cb11-34" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb11-35"><a href="#cb11-35" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Finally, we invoke the contract:</p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">soroban</span> invoke <span class="dt">\</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--id</span> 9c17051a8d43f2e1e062e69980df8b41ebbf55a50065daee59c8b7a4720b10f8 <span class="dt">\</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--secret-key</span> SECRET <span class="dt">\</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--rpc-url</span> http://INSTANCE_HOST:8000/soroban/rpc <span class="dt">\</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--network-passphrase</span> <span class="st">&#39;Standalone Network ; February 2017&#39;</span> <span class="dt">\</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--fn</span> test_sig <span class="at">--arg</span> <span class="st">&#39;{&quot;object&quot;:{&quot;vec&quot;:[{&quot;symbol&quot;:&quot;Ed25519&quot;},{&quot;object&quot;:{&quot;map&quot;:[{&quot;key&quot;:{&quot;symbol&quot;:&quot;public_key&quot;},&quot;val&quot;:{&quot;object&quot;:{&quot;bytes&quot;:&quot;3db6c121f4ae71d5c8db6efe199b57581e2973bfa3cc2b4a55f1c1b35fcb68ea&quot;}}},{&quot;key&quot;:{&quot;symbol&quot;:&quot;signature&quot;},&quot;val&quot;:{&quot;object&quot;:{&quot;bytes&quot;:&quot;50f37d6dabe59021ed89433391e21bdc6c732169a4fca40a8abdd89e24b881bc568a2edb6722b92a61e9eeb8e773b6c1d308a4dec41b1effc8ecb3d3fa6b7b0a&quot;}}}]}}]}}&#39;</span> <span class="at">--arg</span> <span class="st">&quot;68656c6c6f&quot;</span> <span class="at">--arg</span> <span class="st">&quot;68656c6c6f&quot;</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a><span class="ex">output:</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a><span class="ex">success</span></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a><span class="ex">null</span></span></code></pre></div>
+<p>As you can see, we just successfully verified an “Advanced Auth”
+signature!</p>

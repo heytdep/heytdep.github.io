@@ -1,0 +1,212 @@
+<h3 id="tldr">TL;DR</h3>
+<p>Soroban provides an <code>events()</code> handle in the environment
+that allows us to publish events. In this post we’ll explore how to
+publish events, why a contract would publish one, and how to read these
+events (so one can set up a listener for them).</p>
+<h2 id="what-are-smart-contract-events">What are smart contract
+events?</h2>
+<p>Events are something that exists on most smart contract platforms,
+and are a way of dispatching signals to the outer ecosystem (they are
+not readable from contracts). Events are the way contracts can
+comunicate with a dApp or frontend in general.</p>
+<h2 id="why-events-exist">Why events exist?</h2>
+<p>When a user interacts with a contracts, knowing what happens in an
+invocation is extremely important, and there are many case scenarios
+where the returned value from the contract invocation is opaque (we know
+that the transaction succeeded, but we don’t know what happened
+exactly). For example:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> test_fn(e<span class="op">:</span> Env) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">,</span> <span class="bu">Error</span><span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> invoker <span class="op">=</span> e<span class="op">.</span>invoker()<span class="op">;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> some_condition(invoker) <span class="op">{</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        do_this()<span class="op">;</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Ok</span>(())</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> some_other_condition(invoker) <span class="op">{</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>        do_that()<span class="op">;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Ok</span>(())</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Err</span>(<span class="bu">Error</span><span class="pp">::</span>NoCondition)</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>As you can see, different things can happen during this invocation,
+and the contract would always return the same. In this situation,
+contracts could use events to log that an action triggered by a
+condition is happening, so that the invoker knows what happened without
+having to run checks themselves. Also, in most cases you might need to
+emit multiple events for one invocation, which means that a return type
+won’t do the job (not in a clean manner at least).</p>
+<p>Another advantage of events is that they are made to be indexable,
+easing the process of listening/searching.</p>
+<h2 id="publishing-events">Publishing events</h2>
+<p>The syntax for publishing events is very simple on Soroban:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> event <span class="op">=</span> env<span class="op">.</span>events()<span class="op">;</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> topic <span class="op">=</span> (<span class="pp">symbol!</span>(<span class="st">&quot;mytopic&quot;</span>)<span class="op">,</span>)<span class="op">;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> data <span class="op">=</span> <span class="pp">Bytes::</span>from_array(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>[<span class="dv">104</span><span class="op">,</span> <span class="dv">101</span><span class="op">,</span> <span class="dv">108</span><span class="op">,</span> <span class="dv">108</span><span class="op">,</span> <span class="dv">111</span>])<span class="op">;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>event<span class="op">.</span>publish(topic<span class="op">,</span> data)<span class="op">;</span></span></code></pre></div>
+<p>As you can see, we first build the <code>Events</code> type with
+<code>env.events()</code>, and then publish an event with certain topics
+and associated data.</p>
+<h3 id="what-are-topics">What are topics?</h3>
+<p>Generally speaking smart contract event topics are the indexed
+parameters to the event. For example in solidity, you define an Event
+object:</p>
+<pre class="solidity"><code>event SomeEvent(uint indexed mynum, unint other);</code></pre>
+<p>And then use <code>emit</code> to log the data to the blockchain:</p>
+<pre class="solidity"><code>emit SomeEvent(2, 0)</code></pre>
+<p>What happens here is that we are creating a log entry with the
+topics: <code>SomeEvent(uint, uint)</code> (as hash) and the topic
+<code>2</code> (the <code>indexed</code> param value). Note that
+<code>0</code> is also stored, but not as a topic, it will be in the
+event’s data section.</p>
+<p>In Soroban, things are currently slightly different:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> topics <span class="op">=</span> (<span class="pp">symbol!</span>(<span class="st">&quot;mynum&quot;</span>)<span class="op">,</span>)<span class="op">;</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> data <span class="op">=</span> (<span class="dv">2u32</span><span class="op">,</span> <span class="dv">0u32</span>)<span class="op">;</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>events<span class="op">.</span>publish(topics<span class="op">,</span> data)<span class="op">;</span></span></code></pre></div>
+<p>This will create an event with topics <code>(mynum)</code> and data
+<code>(2, 0)</code>. So you can index the event based on
+<code>"mynum"</code>.</p>
+<h2 id="developing-a-contract-that-publishes-events">Developing a
+contract that publishes events</h2>
+<p>Now that you know what events are, how they work and how topics work,
+you are ready to build a simple contract that publishes an event when it
+is initialized:</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_auth::</span>Identifier<span class="op">;</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_sdk::</span><span class="op">{</span>contractimpl<span class="op">,</span> <span class="pp">serde::</span>Serialize<span class="op">,</span> symbol<span class="op">,</span> Env<span class="op">};</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co">/// Contract trait</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">trait</span> EventsContractTrait <span class="op">{</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> init(e<span class="op">:</span> Env<span class="op">,</span> admin<span class="op">:</span> Identifier)<span class="op">;</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> EventsContract<span class="op">;</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> EventsContractTrait <span class="cf">for</span> EventsContract <span class="op">{</span></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> init(e<span class="op">:</span> Env<span class="op">,</span> admin<span class="op">:</span> Identifier) <span class="op">{</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> event <span class="op">=</span> e<span class="op">.</span>events()<span class="op">;</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> t1 <span class="op">=</span> (<span class="pp">symbol!</span>(<span class="st">&quot;init&quot;</span>)<span class="op">,</span>)<span class="op">;</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> id_bytes <span class="op">=</span> admin<span class="op">.</span>serialize(<span class="op">&amp;</span>e)<span class="op">;</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>        event<span class="op">.</span>publish(t1<span class="op">,</span> (id_bytes<span class="op">,</span> ))<span class="op">;</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>This contract comunicates to its users that it was initialized with a
+certain admin identifier (serialized into bytes, so a buffer of
+<code>0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7, 65, 99, 99, 111, 117, 110, 116, 0, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 0,</code>
++ bytes of the strkey decoded public key).</p>
+<p>In our case, testing doesn’t really make sense unless you just want
+to verify that the <code>init</code> function executes, since the logged
+data cannot be accessed from a test/contract via the environment. The
+only way to thorughly test this contract is to deploy it to futurent and
+invoke the init function.</p>
+<h3 id="deployment">Deployment</h3>
+<p>We first need to compile the contract (the built options are to build
+optimized WASM binaries):</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">~/De/soroban-events-playground</span> main !5 ❯ cargo +nightly build <span class="dt">\</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--target</span> wasm32-unknown-unknown <span class="dt">\</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--release</span> <span class="dt">\</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">-Z</span> build-std=std,panic_abort <span class="dt">\</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">-Z</span> build-std-features=panic_immediate_abort</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>   <span class="ex">Compiling</span> soroban-events-playground-contract v0.0.0 <span class="er">(</span><span class="ex">/home/tommasodeponti/Desktop/soroban-events-playground</span><span class="kw">)</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    <span class="ex">Finished</span> release <span class="pp">[</span><span class="ss">optimized</span><span class="pp">]</span> target<span class="er">(</span><span class="ex">s</span><span class="kw">)</span> <span class="er">in</span> <span class="ex">0.37s</span></span></code></pre></div>
+<p>Then we can deploy the contract:</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">soroban</span> deploy <span class="dt">\ </span>     </span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    <span class="ex">--wasm</span> target/wasm32-unknown-unknown/release/soroban_events_playground_contract.wasm  <span class="at">--secret-key</span> SDUOZUZMO7FDMBTAXVFMKLOGERC7AMGZB465LAAQ57NJWKDKG7FKSADY <span class="at">--rpc-url</span>  https://future.stellar.kai.run:443/soroban/rpc <span class="at">--network-passphrase</span> <span class="st">&#39;Test SDF Future Network ; October 2022&#39;</span>                          </span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="ex">success</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="ex">d37dd09bca47a5bb3033655047ff61c90ed7107ade9c632603187a9a0dd5074c</span></span></code></pre></div>
+<h3 id="invoking">Invoking</h3>
+<p>Assuming that you are already familiar with the soroban CLI basics,
+invoking shouldn’t be difficult:</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">soroban</span> invoke <span class="at">--id</span> d37dd09bca47a5bb3033655047ff61c90ed7107ade9c632603187a9a0dd5074c <span class="dt">\</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--secret-key</span> SB3YZR6KMXEOEWAMS4HUQX4JTWW6METEP3LAXSH2F3GQQT4LOYCR3A44 <span class="dt">\</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--rpc-url</span> https://future.stellar.kai.run:443/soroban/rpc <span class="dt">\</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--network-passphrase</span> <span class="st">&#39;Test SDF Future Network ; October 2022&#39;</span> <span class="dt">\</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--fn</span> init <span class="at">--arg</span> <span class="st">&#39;{&quot;object&quot;:{&quot;vec&quot;:[{&quot;symbol&quot;:&quot;Account&quot;},{&quot;object&quot;:{&quot;accountId&quot;:{&quot;publicKeyTypeEd25519&quot;:&quot;5baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d&quot;}}}]}}&#39;</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="ex">success</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="ex">null</span></span></code></pre></div>
+<p>Remember that to build the <code>Identifier</code> we constructed the
+<code>Identifier::Account(AccountId)</code> as the JSON representation.
+If you’re not familiar with this at all, you can check out <a
+href="https://github.com/xycloo/soroban-cli-futurenet">our
+guide</a>.</p>
+<h3 id="reading-the-event">Reading the event</h3>
+<p>Our invocation will result in a transaction with a
+<code>InvokeHostFunctionOp</code> operation. Currenlty, we can find our
+event in the transaction’s result metadata.</p>
+<p>This means that we’ll have to locate the transaction, and then look
+at it from horizon to obtain the <code>TxResultMeta</code>’s XDR. In my
+case, <a
+href="https://horizon-futurenet.stellar.org/transactions/914dea439a1f052d89039f438ffc95f707a67891ff15bd1eb17463020f0b8acc">this</a>
+was the invocation transaction. To find yours you can also look at <a
+href="https://leighmcculloch.github.io/soroban-fiddle/">Soroban
+Fiddle</a>.</p>
+<p>Now that we have the XDR:</p>
+<pre><code>AAAAAwAAAAIAAAADAA8powAAAAAAAAAAPoOJtiEgMrkMLE7ug0nnQZ2Jonc/Hdf/z+foCIsrUxsAAAAXSHbhwAAOTDAAAAAPAAAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAwAAAAAADl/LAAAAAGN9IpIAAAAAAAAAAQAPKaMAAAAAAAAAAD6DibYhIDK5DCxO7oNJ50GdiaJ3Px3X/8/n6AiLK1MbAAAAF0h24cAADkwwAAAAEAAAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAMAAAAAAA8powAAAABjgRP2AAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAbcurZbKXu8AXk2iS+oXuPMJxF48RGRh6ddSk9aqrKAAAAAAAQAAAAAAAAABAAAABQAAAARpbml0AAAABAAAAAEAAAAEAAAAUAAAAAQAAAABAAAAAAAAAAIAAAAFAAAAB0FjY291bnQAAAAABAAAAAEAAAAHAAAAAFuqjxp1JiaNH6/0sEF3gApbMj8AvD0n+2wzgz4Q0FGNAAAAAAAAAGQAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAMAAAAAAAAAAPtKlS+NuolelIJrIn5jV26Hul945cSBGyXTmiwy50Wq6fNHY5h5xGw0fSQ+E4DLlQgS7wNFJuy7dbX1/S0VALkzhhDHHyug9wgX+sGGnfU5/niQQOWCkHZShBN5TwmwBA==</code></pre>
+<p>And we can open-up the laboratory and <a
+href="https://laboratory.stellar.org/#xdr-viewer?input=AAAAAwAAAAIAAAADAA8powAAAAAAAAAAPoOJtiEgMrkMLE7ug0nnQZ2Jonc%2FHdf%2Fz%2BfoCIsrUxsAAAAXSHbhwAAOTDAAAAAPAAAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAwAAAAAADl%2FLAAAAAGN9IpIAAAAAAAAAAQAPKaMAAAAAAAAAAD6DibYhIDK5DCxO7oNJ50GdiaJ3Px3X%2F8%2Fn6AiLK1MbAAAAF0h24cAADkwwAAAAEAAAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAMAAAAAAA8powAAAABjgRP2AAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAbcurZbKXu8AXk2iS%2BoXuPMJxF48RGRh6ddSk9aqrKAAAAAAAQAAAAAAAAABAAAABQAAAARpbml0AAAABAAAAAEAAAAEAAAAUAAAAAQAAAABAAAAAAAAAAIAAAAFAAAAB0FjY291bnQAAAAABAAAAAEAAAAHAAAAAFuqjxp1JiaNH6%2F0sEF3gApbMj8AvD0n%2B2wzgz4Q0FGNAAAAAAAAAGQAAAAAAAAAAQAAAAAAAAAYAAAAAAAAAAMAAAAAAAAAAPtKlS%2BNuolelIJrIn5jV26Hul945cSBGyXTmiwy50Wq6fNHY5h5xGw0fSQ%2BE4DLlQgS7wNFJuy7dbX1%2FS0VALkzhhDHHyug9wgX%2BsGGnfU5%2FniQQOWCkHZShBN5TwmwBA%3D%3D&amp;type=TransactionMeta&amp;network=futurenet">decode</a>
+it. You can then find the events logged in this transaction:</p>
+<pre><code>events: Array[1]
+    [0]
+        ext: [undefined]
+        contractId: ty6tlspe7wBeTaJL6he48wnEXjxEZGHp11KT1qqsoAA=
+        type
+        body: [undefined]
+        v0
+            topics: Array[1]
+                [0]: [scvSymbol]
+                    sym: aW5pdA==
+                data: [scvObject]
+                    obj: [scoBytes]
+                        bin: AAAABAAAAAEAAAAAAAAAAgAAAAUAAAAHQWNjb3VudAAAAAAEAAAAAQAAAAcAAAAAW6qPGnUmJo0fr/SwQXeAClsyPwC8PSf7bDODPhDQUY0=
+</code></pre>
+<p>You can also read the <code>TransactionMeta</code> and obtain the
+completely decoded event by using a stellar XDR library, for example,
+you could use the rs-stellar-xdr crate (from Soroban Fiddle):</p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> contract_events <span class="op">=</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Ok</span>(<span class="pp">TransactionMeta::</span>V3(TransactionMetaV3 <span class="op">{</span> events<span class="op">,</span> <span class="op">..</span> <span class="op">}</span>)) <span class="op">=</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>        <span class="pp">TransactionMeta::</span>from_xdr_base64(RESULT_META_XDR)</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>        <span class="cn">Some</span>(events<span class="op">.</span>into())</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>        <span class="cn">None</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">};</span></span></code></pre></div>
+<p>Which corresponds to:</p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ot">[</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">{</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;ext&quot;</span><span class="fu">:</span> <span class="st">&quot;v0&quot;</span><span class="fu">,</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;contractId&quot;</span><span class="fu">:</span> <span class="st">&quot;d37dd09bca47a5bb3033655047ff61c90ed7107ade9c632603187a9a0dd5074c&quot;</span><span class="fu">,</span></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;contract&quot;</span><span class="fu">,</span></span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;body&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;v0&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;topics&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>          <span class="fu">{</span></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>            <span class="dt">&quot;symbol&quot;</span><span class="fu">:</span> <span class="st">&quot;init&quot;</span></span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>          <span class="fu">}</span></span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>        <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;data&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;object&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a>            <span class="dt">&quot;vec&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a>              <span class="fu">{</span></span>
+<span id="cb13-17"><a href="#cb13-17" aria-hidden="true" tabindex="-1"></a>                <span class="dt">&quot;object&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb13-18"><a href="#cb13-18" aria-hidden="true" tabindex="-1"></a>                  <span class="dt">&quot;bytes&quot;</span><span class="fu">:</span> <span class="st">&quot;0000000400000001000000000000000200000005000000074163636f756e7400000000040000000100000007000000005baa8f1a7526268d1faff4b04177800a5b323f00bc3d27fb6c33833e10d0518d&quot;</span></span>
+<span id="cb13-19"><a href="#cb13-19" aria-hidden="true" tabindex="-1"></a>                <span class="fu">}</span></span>
+<span id="cb13-20"><a href="#cb13-20" aria-hidden="true" tabindex="-1"></a>              <span class="fu">}</span></span>
+<span id="cb13-21"><a href="#cb13-21" aria-hidden="true" tabindex="-1"></a>            <span class="ot">]</span></span>
+<span id="cb13-22"><a href="#cb13-22" aria-hidden="true" tabindex="-1"></a>          <span class="fu">}</span></span>
+<span id="cb13-23"><a href="#cb13-23" aria-hidden="true" tabindex="-1"></a>        <span class="fu">}</span></span>
+<span id="cb13-24"><a href="#cb13-24" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb13-25"><a href="#cb13-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb13-26"><a href="#cb13-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb13-27"><a href="#cb13-27" aria-hidden="true" tabindex="-1"></a><span class="ot">]</span></span></code></pre></div>
+<p>Congratulations! You have created and read your first Soroban
+event.</p>

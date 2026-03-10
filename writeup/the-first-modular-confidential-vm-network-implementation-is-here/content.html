@@ -1,0 +1,180 @@
+<p><code>11/12/2024</code></p>
+<p>I’ve recently been introduced to the world of trusted execution
+environments (TEEs), mainly around the topic of confidential virtual
+machines (CVM). Dstack is pretty much the only design for clusters of
+CVMs, and since it lacked a rust implementation that wasn’t enshrined
+and was as minimal as its <a
+href="https://github.com/amiller/dstack-vm/">orginal python
+counterpart</a>, I’ve decided to create one myself.</p>
+<p><img src="/images/cvmbootstrap.png"></p>
+<h1 id="rs-modular-dstack">rs-modular-dstack</h1>
+<p><a
+href="https://github.com/heytdep/rs-modular-dstack">rs-modular-dstack</a>
+is not a standard dstack implementation though, it’s built from the
+ground up to be as modular as possible enabling implementors to build
+fully customizable dstack implementations following the building blocks
+provided by a core sdk. The reason for having such codebase design is
+simple: dstack is not a network standard that all nodes need to follow,
+it’s simply a standardized way of sharing secret state between
+confidential virtual machines, but many parts of the cluster
+implementation have little to do with the dstack design. Actually, most
+of the implementation has little to do with the dstack standard and
+should be up to the individual implementor to adapt the cluster to the
+app’s requirements.</p>
+<p>For example, dstack relies on various paths both on the host machine
+and on the guest machine to request secret-derived tagged hashes or
+trigger actions, and <code>dstack-core</code> provides highly
+customizable generics to be used to fill a hardcoded path structure. For
+instance for the guest these are some of the generics:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>async_trait<span class="at">]</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">trait</span> GuestServiceInner<span class="op">:</span> TdxOnlyGuestServiceInner <span class="op">{</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> Pubkey: Send + Sync + DeserializeOwned + Serialize<span class="op">;</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> EncryptedMessage: Send + Sync + Serialize<span class="op">;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> Quote: Send + Sync + DeserializeOwned<span class="op">;</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">type</span> SharedKey<span class="op">;</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> get_secret(<span class="op">&amp;</span><span class="kw">self</span>) <span class="op">-&gt;</span> <span class="pp">anyhow::</span><span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Self</span><span class="pp">::</span>SharedKey<span class="op">&gt;;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> replicate_thread(<span class="op">&amp;</span><span class="kw">self</span>) <span class="op">-&gt;</span> <span class="pp">anyhow::</span><span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Self</span><span class="pp">::</span>SharedKey<span class="op">&gt;;</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> onboard_new_node(</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>        quote<span class="op">:</span> <span class="dt">Self</span><span class="pp">::</span>Quote<span class="op">,</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>        pubkeys<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span><span class="dt">Self</span><span class="pp">::</span>Pubkey<span class="op">&gt;,</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="pp">anyhow::</span><span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Self</span><span class="pp">::</span>EncryptedMessage<span class="op">&gt;;</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>and this is how they are exported by <code>dstack-core</code>:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> GuestPaths<span class="op">&lt;</span>H<span class="op">:</span> GuestServiceInner<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> inner_guest<span class="op">:</span> Arc<span class="op">&lt;</span>H<span class="op">&gt;,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span><span class="op">&lt;</span>H<span class="op">:</span> GuestServiceInner <span class="op">+</span> <span class="bu">Send</span> <span class="op">+</span> <span class="bu">Sync</span><span class="op">&gt;</span> GuestPaths<span class="op">&lt;</span>H<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> onboard_new_node(</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="kw">impl</span> Filter<span class="op">&lt;</span>Extract <span class="op">=</span> <span class="kw">impl</span> <span class="pp">warp::</span>Reply<span class="op">,</span> <span class="bu">Error</span> <span class="op">=</span> <span class="pp">warp::</span>Rejection<span class="op">&gt;</span> <span class="op">+</span> <span class="bu">Clone</span> <span class="op">{</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>        <span class="pp">warp::</span>path(<span class="st">&quot;onboard&quot;</span>)</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and(<span class="pp">warp::</span>post())</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and(<span class="pp">warp::body::</span>json())</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and(with_impl(<span class="kw">self</span><span class="op">.</span>inner_guest<span class="op">.</span>clone()))</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and_then(</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>                <span class="op">|</span>request<span class="op">:</span> <span class="pp">requests::</span>OnboardArgs<span class="op">&lt;</span>H<span class="op">&gt;,</span> guest_impl<span class="op">:</span> Arc<span class="op">&lt;</span>H<span class="op">&gt;|</span> <span class="kw">async</span> <span class="kw">move</span> <span class="op">{</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>                    <span class="co">// do stuff with `guest_impl`</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>                <span class="op">},</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>            )</span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Should only be callable within trusted enclaves.</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> get_derived_key(</span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="kw">impl</span> Filter<span class="op">&lt;</span>Extract <span class="op">=</span> <span class="kw">impl</span> <span class="pp">warp::</span>Reply<span class="op">,</span> <span class="bu">Error</span> <span class="op">=</span> <span class="pp">warp::</span>Rejection<span class="op">&gt;</span> <span class="op">+</span> <span class="bu">Clone</span> <span class="op">{</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>        <span class="pp">warp::path!</span>(<span class="st">&quot;getkey&quot;</span>)</span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and(<span class="pp">warp::</span>post())</span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and(<span class="pp">warp::body::</span>json())</span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and(with_impl(<span class="kw">self</span><span class="op">.</span>inner_guest<span class="op">.</span>clone()))</span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>            <span class="op">.</span>and_then(</span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>                <span class="op">|</span>request<span class="op">:</span> <span class="pp">requests::</span>GetKeyArgs<span class="op">&lt;</span>H<span class="op">&gt;,</span> guest_impl<span class="op">:</span> Arc<span class="op">&lt;</span>H<span class="op">&gt;|</span> <span class="kw">async</span> <span class="kw">move</span> <span class="op">{</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>                    <span class="co">// do stuff with `guest_impl`</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>                <span class="op">},</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>            )</span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>This allows the implementor (new-york in our case) to just implement
+<code>GuestServiceInner</code> (and/or use defaults) with the provided
+bounds and structures without needing to fully understand the big
+picture.</p>
+<p>The codebase design is not the topic of this post though, you can
+read more about the rationale of modular-dstack in <a
+href="https://collective.flashbots.net/t/modularizing-dstack-sdks-and-default-patterns-for-creating-p2p-cvm-clusters/4194">my
+original post on flashbots</a>.</p>
+<h2 id="hello-world-is-on-stellars-testnet">Hello world is on Stellar’s
+testnet</h2>
+<p>The <a
+href="https://github.com/heytdep/rs-modular-dstack/tree/main/examples/ping-host">first
+app</a> ever deployed with the modular dstack implementation is on the
+Stellar testnet network! There’s two main reasons:</p>
+<ol type="1">
+<li>It’s the network I’m the most proficient with.</li>
+<li>I think that there’s a lot of interesting use cases for applications
+that would be beneficial on Stellar too and having already the helpers
+to interact with the network from dstack will help future developments
+on the network I’m more involved with.</li>
+</ol>
+<p>The really cool thing about CVMs is that you just need an sgx quoting
+enclave to participate, or better, in the case of <code>new-york</code>
+RA is completely handled by a dummy quote generator and verifier, so you
+don’t need an actual SGX+TDX hardware to participate in running
+<code>ping-host</code> (the very first hello world app), just a linux
+machine with qemu.</p>
+<p>In fact, if you look at what <code>new-york</code> is using to e.g
+verify a quote from a new node attempting to join the cluster:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>async_trait<span class="at">]</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> GuestServiceInner <span class="cf">for</span> GuestServices <span class="op">{</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ..</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">async</span> <span class="kw">fn</span> onboard_new_node(</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="op">&amp;</span><span class="kw">self</span><span class="op">,</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        quote<span class="op">:</span> <span class="dt">Self</span><span class="pp">::</span>Quote<span class="op">,</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        pubkeys<span class="op">:</span> <span class="dt">Vec</span><span class="op">&lt;</span><span class="dt">Self</span><span class="pp">::</span>Pubkey<span class="op">&gt;,</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    ) <span class="op">-&gt;</span> <span class="pp">anyhow::</span><span class="dt">Result</span><span class="op">&lt;</span><span class="dt">Self</span><span class="pp">::</span>EncryptedMessage<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> verify <span class="op">=</span> <span class="kw">self</span><span class="op">.</span>attestation<span class="op">.</span>verify_quote(quote)<span class="op">.</span><span class="kw">await</span><span class="op">?;</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>we’re actually using the <a
+href="https://github.com/heytdep/rs-modular-dstack/tree/main/crates/dummy-attestation">dummy
+attestation object</a> which as you might notice it’s not calling the
+local sgx quoting enclave.</p>
+<h3 id="running-the-tdx-emulator-vm-with-flashbox">Running the TDX
+emulator VM with Flashbox</h3>
+<p>We can use the <a
+href="https://github.com/flashbots/flashbox">flashbox</a> image along
+with qemu to launch a TD (in our case it’s not actually done with tdx
+hardware so we are not actually running in a trusted execution
+environment. This is just for ease of replication, running an actual tee
+just requires adding a few additional flags to qemu):</p>
+<pre><code>qemu-system-x86_64 -D /tmp/qemu-guest.log \
+    -accel kvm -m 16G -smp 4 \
+    -name qemu-vm,process=qemu-vm,debug-threads=on -cpu host -nographic -nodefaults \
+    -device virtio-net-pci,netdev=nic0 -netdev user,id=nic0,hostfwd=tcp::10022-:22,hostfwd=tcp::24070-:24070,hostfwd=tcp::24071-:24071 \
+    -drive file=../flashbox/flashbox.raw,if=none,id=virtio-disk0 -device virtio-blk-pci,drive=virtio-disk0 \
+    -bios /usr/share/ovmf/OVMF.fd \
+    -chardev stdio,id=char0,mux=on,signal=off -mon chardev=char0 -serial chardev:char0 \
+    -pidfile /tmp/qemu-pid.pid -machine q35 &amp;</code></pre>
+<blockquote>
+<p>Note that <code>file=../flashbox/flashbox.raw</code> should point to
+the flashbox image.</p>
+</blockquote>
+<blockquote>
+<p>Note that you need to add your current user to the kvm group
+first.</p>
+</blockquote>
+<h3 id="newyork.sh">./newyork.sh</h3>
+<p>This is the command that will bootstrap or onboard your node to the
+provided cluster. It accepts 4 parameters: the cluster contract address,
+the stellar secret key for signing+submitting transactions, the host
+interface address (can find it with <code>ifconfig</code> and port 8000)
+and lastly the public key if you’re trying to join a cluster that was
+not yet initialized.</p>
+<pre><code>./newyork.sh CLUSTER SECRET 192.168.x.x:8000</code></pre>
+<p>Under the hood, it deploys the pod newyork pod containing both the
+guest services and the <code>ping-host</code> app to the TD VM while it
+runs the host environment on the host machine:</p>
+<p><img src="/images/newyorksh.png"></p>
+<p>On the qemu vm side, you should be able to check the logs of the
+newyork container running</p>
+<pre><code>podman logs new-york-pod-new-york-container</code></pre>
+<p>which should let you access the internal logs verifying that you’ve
+indeed generated the shared secret within the TD and forwared the
+bootstrap request to the host service (picture above):</p>
+<p><img src="/images/obtainedsecret.jpeg"></p>
+<h1 id="whats-next">What’s Next</h1>
+<p>This is just the beginning of my work on TEEs, specifically I’m
+planning on continuing to maintain and improve
+<code>rs-modular-dstack</code> to make it actually safe and maybe work
+on some lower level primitives for interacting with the quoting
+enclave.</p>
+<p>Further down the list is built-in support for MPC, partial consensus
+mechanisms, continuous randomized attestations, and other improvements
+for extra security.</p>

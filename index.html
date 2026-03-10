@@ -1,557 +1,227 @@
 <!DOCTYPE html>
-<html class="">
+<html>
 <meta charset="UTF-8">
-<head> 
+<head>
 <link href="index.css" rel="stylesheet">
-<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{{"token": "e9adb517193447a3a9c4d5064ffa2550"}}'></script><!-- End Cloudflare Web Analytics -->
+<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "e9adb517193447a3a9c4d5064ffa2550"}'></script><!-- End Cloudflare Web Analytics -->
 </head>
 <style>
-:root {
-        --primary-color: #2d2d2d;
-        --secondary-color: #666;
-        --accent-color: rgb(249, 15, 18);
-        --background-color: #fff;
-        --container-width: 800px;
-    }
-
-    * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        line-height: 1.6;
-        color: var(--primary-color);
-        background-color: var(--background-color);
-        padding: 2rem 1rem;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+        background: #fff;
+        padding: 3rem 1.5rem;
     }
 
     .container {
-        max-width: var(--container-width);
+        max-width: 700px;
         margin: 0 auto;
     }
 
     header {
-        margin-bottom: 3rem;
-        text-align: center;
+        margin-bottom: 2.5rem;
     }
 
-    h1 {
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .subtitle {
-        color: var(--secondary-color);
+    header h1 {
         font-size: 1.1rem;
-        margin-bottom: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 0.2rem;
+        border: none;
     }
 
-    .title {
-        font-size: 1.5rem;
+    header .handle {
+        font-size: 0.85rem;
+        color: #888;
+        margin-bottom: 0.6rem;
     }
 
-    .bio {
-        max-width: 600px;
-        margin: 0 auto 1.5rem;
-        line-height: 1.7;
+    header .handle a { color: #888; }
+    header .handle a:hover { color: #333; }
+
+    header .bio {
+        font-size: 0.85rem;
+        color: #666;
+        line-height: 1.5;
     }
 
-    .note {
+    header .bio a { color: #555; text-decoration: underline; }
+
+    .sections {
+        display: flex;
+        gap: 0.8rem;
+        margin-bottom: 2rem;
+        border-bottom: 1px solid #e5e5e5;
+        padding-bottom: 0;
+    }
+
+    .sections a {
+        font-size: 0.8rem;
+        color: #999;
+        text-decoration: none;
+        padding-bottom: 0.5rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        border-bottom: 1.5px solid transparent;
+        transition: color 0.15s;
+    }
+
+    .sections a:hover { color: #333; }
+    .sections a.active { color: #333; border-bottom-color: #333; }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    .year-label {
+        font-size: 0.8rem;
+        color: #aaa;
+        font-weight: 600;
+        margin: 1.5rem 0 0.5rem;
+        letter-spacing: 0.02em;
+    }
+
+    .entry {
+        padding: 0.4rem 0;
+    }
+
+    .entry a {
         font-size: 0.9rem;
-        color: var(--secondary-color);
-        margin-top: 1rem;
-    }
-
-    a {
+        color: #333;
         text-decoration: none;
-        transition: color 0.2s;
     }
 
-    a:hover {
-        text-decoration: underline;
+    .entry a:hover { color: rgb(249, 15, 18); }
+
+    .entry .date {
+        font-size: 0.75rem;
+        color: #bbb;
+        margin-left: 0.4rem;
     }
 
-    .social-links {
-        margin-top: 1.5rem;
+    .entry .tag {
+        font-size: 0.65rem;
+        color: #bbb;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-left: 0.3rem;
     }
 
-    .social-links a {
-        display: inline-block;
-        margin: 0 0.5rem;
-        opacity: 0.7;
-        transition: opacity 0.2s;
+    .research-entry {
+        padding: 0.6rem 0;
+        border-bottom: 1px solid #f5f5f5;
     }
 
-    .social-links a:hover {
-        opacity: 1;
+    .research-entry a.title-link {
+        font-size: 0.9rem;
+        color: #333;
+        text-decoration: none;
+        display: block;
     }
 
-    .posts-list ul {
-        list-style: none;
+    .research-entry a.title-link:hover { color: rgb(249, 15, 18); }
+
+    .research-entry .snippet {
+        font-size: 0.78rem;
+        color: #999;
+        line-height: 1.4;
+        margin-top: 0.15rem;
     }
 
-    .posts-list li {
+    .research-note {
+        font-size: 0.78rem;
+        color: #aaa;
         margin-bottom: 1.5rem;
-        padding-bottom: 1.5rem;
-        border-bottom: 1px solid #eee;
-    }
-
-    
-    .posts-list h3 {
-        font: 500 1rem/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
-    }
-
-    .posts-list h3 a {
-        text-decoration: none;
-        font-size: 1.3rem;
-        color: black
-        
-    }
-
-    .posts-list h3 a:hover {
-        color: var(--accent-color);
-    }
-
-    .year {
-        color: var(--secondary-color);
-        font-size: 1.4rem;
-        margin: 2rem 0 1rem;
-        border-bottom: none !important;
+        line-height: 1.4;
     }
 
     @media (max-width: 600px) {
-        body {
-            padding: 1rem;
-        }
-
-        h1 {
-            font-size: 2rem;
-        }
-
-        .bio {
-            font-size: 0.95rem;
-        }
+        body { padding: 1.5rem 1rem; }
     }
 </style>
 
+<script>
+function switchTab(tab) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.sections a').forEach(a => a.classList.remove('active'));
+    document.getElementById(tab).classList.add('active');
+    document.querySelector('[data-tab="' + tab + '"]').classList.add('active');
+}
+</script>
+
 
 <body>
-    <div class="container">
-        <header>
-            <h1 class="title">Tommaso De Ponti</h1>
-            <a href="https://x.com/heytdep" target="__blank"><div class="subtitle">@heytdep</div></a>
-            
-            <div class="bio">
-                <p>founding eng/research new thing <a href="https://x.com/tplus_cx">@tplus_cx</a>, co-founder <a href="https://x.com/xyclooLabs">@xyclooLabs</a>, trusted (?) execution | 🦀<p/>
-                <p class="note">Articles with the &#128215 suffix are intended for general public, 
-                   &#128216 are personal notes.</p>
-            </div>
-        </header>
+<div class="container">
+    <header>
+        <h1>Tommaso De Ponti</h1>
+        <div class="handle"><a href="https://x.com/heytdep" target="_blank">@heytdep</a></div>
+        <div class="bio">founding eng/research <a href="https://x.com/tplus_cx">@tplus_cx</a>, co-founder <a href="https://x.com/xyclooLabs">@xyclooLabs</a>, trusted (?) execution</div>
+    </header>
 
-        <main>
-            <div class="posts-list">
-                <ul>
-    <li>
-    <h3 class="year"><p>2025 copy</p></h3>
-    </li>
-    
-    <li>
-    <p>13/02/2026</p>
-    <h3><a href="./post/44/post.html">Tropical Encryption: Near Zero Overhead Homomorphic Computation (and lightweight rust lib!!) &#128215</a></h3>
-    <p class="subtitle">
+    <nav class="sections">
+        <a href="javascript:switchTab('writeups')" data-tab="writeups" class="active">writeups</a>
+        <a href="javascript:switchTab('research')" data-tab="research">research</a>
+    </nav>
 
-> I'm not a cryptographer, just a curious person working with applied cryptography to solve distributed systems problems. Feel free to call out any incorrect/imprecise maths!
+    <div id="writeups" class="section active">
+        <div class="year-label">2026</div>
+        <div class="entry"><a href="./writeup/tropical-encryption-near-zero-overhead-homomorphic-computation-and-lightweight-rust-lib/">Tropical Encryption: Near Zero Overhead Homomorphic Computation (and lightweight rust lib!!)</a><span class="date">13/02/2026</span></div>
+        <div class="entry"><a href="./writeup/flip-the-qap-witness-encryption-for-dcap-in-practice-and-rust/">Flip the QAP! Witness Encryption for DCAP in Practice (and Rust)</a><span class="date">08/02/2026</span></div>
+        <div class="entry"><a href="./writeup/practical-proof-of-cloud-with-tdx--vtpm-dual-attestation-copy/">Practical Proof Of Cloud with TDX <> vTPM Dual Attestation copy</a><span class="date">19/01/2026</span></div>
+        <div class="year-label">2025</div>
+        <div class="entry"><a href="./writeup/user-space-interface-side-channel-attacks-on-tees-from-inferring-secrets-to-censorship/">User Space Interface Side Channel Attacks on TEEs: From Inferring Secrets To Censorship</a><span class="date">14/10/2025</span></div>
+        <div class="entry"><a href="./writeup/tees--stellar-data-workflows-a-poc/">TEEs <> Stellar Data Workflows: a PoC</a><span class="date">04/09/2025</span></div>
+        <div class="entry"><a href="./writeup/tees-for-trustless-complex-data-workflows-for-blockchain-apps/">TEEs for Trustless Complex Data Workflows For Blockchain Apps</a><span class="date">04/09/2025</span></div>
+        <div class="entry"><a href="./writeup/sandboxed-quote-generation-leveraging-report-data-and-dynamically-supporting-multiple-applications-within-the-same-tdx-vm/">Sandboxed Quote Generation, Leveraging Report Data and Dynamically Supporting Multiple Applications Within The Same TDX VM</a><span class="date">17/08/2025</span></div>
+        <div class="entry"><a href="./writeup/personal-thoughts-on-key-management-services--trusted-execution-environments-and-exploring-possible-alternatives/">Personal thoughts on Key Management Services <> Trusted Execution Environments and Exploring Possible Alternatives</a><span class="date">14/08/2025</span></div>
+        <div class="entry"><a href="./writeup/building-blocks-for-tplus-consensus/">Building Blocks For Tplus Consensus</a><span class="date">26/07/2025</span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/how-do-leader-based-consensus-mechanisms-look-like-on-tees/">How Do Leader Based Consensus Mechanisms Look Like on TEEs?</a><span class="date"></span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/diving-into-leader-rotation-mechanisms-for-tee-backed-clusters/">Diving into Leader Rotation Mechanisms for TEE Backed Clusters</a><span class="date">06/06/2025</span></div>
+        <div class="entry"><a href="./writeup/draft-imagining-a-decentralized-cloud-computation-infrastructure-blockchains-tees-and-cr/">[Draft] Imagining a Decentralized Cloud Computation Infrastructure: blockchains, TEEs and CR</a><span class="date">17/05/2025</span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/understanding-helios-and-exploring-light-clients-affinity-to-tees/">Understanding Helios and Exploring Light Clients' Affinity to TEEs</a><span class="date">03/04/2025</span></div>
+        <div class="entry"><a href="./writeup/draft-designing-a-tee-app-resistant-to-hacked-chips/">[Draft] Designing a TEE App Resistant to Hacked Chips</a><span class="date">30/01/2025</span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/draft-towards-a-more-modular-dstack-implementation/">[Draft] Towards a More Modular Dstack Implementation</a><span class="date"></span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/running-helios-clients-on-gcp-tdx-tee-for-attestable-data/">Running Helios Clients on GCP TDX TEE For Attestable Data</a><span class="date">27/02/2025</span></div>
+        <div class="entry"><a href="./writeup/understanding-vtpmtdx-attestation-and-quoting-through-the-tsm-abi/">Understanding vTPM+TDX Attestation and Quoting Through the TSM ABI</a><span class="date">22/02/2025</span></div>
+        <div class="year-label">2024</div>
+        <div class="entry"><a href="./writeup/stellar-and-mev-deep-dive-into-optimal-tx-ordering-censorhip-and-eclipse-mev-copy/">Stellar And MeV: Deep Dive into Optimal Tx Ordering, Censorhip, and Eclipse MeV copy</a><span class="date">30/01/2025</span></div>
+        <div class="entry"><a href="./writeup/the-first-modular-confidential-vm-network-implementation-is-here/">The First Modular Confidential VM Network Implementation is Here</a><span class="date">11/12/2024</span></div>
+        <div class="entry"><a href="./writeup/guest-level-opt-in-reentrancy-on-the-soroban-virtual-machine/">Guest Level Opt In Reentrancy On The Soroban Virtual Machine?</a><span class="date">06/11/2024</span></div>
+        <div class="entry"><a href="./writeup/one-step-closer-to-defi-new-horizons-and-why-i-started-adding-protocol-utilities-in-zephyr-copy/">One Step Closer To DeFi: New Horizons and Why I Started Adding Protocol Utilities In Zephyr copy</a><span class="date">05/11/2024</span></div>
+        <div class="entry"><a href="./writeup/my-meridian-2024-talks-recap/">My Meridian 2024 Talks Recap</a><span class="date">04/11/2024</span></div>
+        <div class="entry"><a href="./writeup/meridian-2024-svm-talk-technical-references/">Meridian 2024 SVM Talk Technical References</a><span class="date">15/10/2024</span></div>
+        <div class="entry"><a href="./writeup/proposing-a-safe-on-chain-actions-standard-through-smart-wallets/">Proposing a Safe On Chain Actions Standard through Smart Wallets</a><span class="date">19/08/2024</span></div>
+        <div class="year-label">2023</div>
+        <div class="entry"><a href="./writeup/going-through-stellar-mainnet-whole-history-with-rs-ingest-copy/">Going through Stellar Mainnet whole History with rs ingest copy</a><span class="date">22/09/2023</span></div>
+        <div class="entry"><a href="./writeup/update-1-soroban-zig-sdk/">Update 1: Soroban Zig sdk</a><span class="date">2/10/2023</span></div>
+        <div class="year-label">2022</div>
+        <div class="entry"><a href="./writeup/testing-the-first-working-version-of-soroban-analyzer/">Testing the first working version of Soroban Analyzer</a><span class="date">Jan 16, 2023</span></div>
+        <div class="entry"><a href="./writeup/playing-with-soroban-events/">Playing with Soroban events</a><span class="date">events()</span></div>
+        <div class="entry"><a href="./writeup/rock-paper-scissors-betting-smart-contract/">Rock paper scissors betting smart contract</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/soroban-advanced-auth-on-the-cli/">Soroban advanced auth on the CLI</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/now-also-markdown-here/">Now Also Markdown Here</a><span class="date"></span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/soroban-commit-reveal-hashing-scheme/">Soroban commit reveal hashing scheme</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/soroban-dutch-auction-smart-contract/">Soroban Dutch Auction Smart Contract</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/soroban-cli-basics-deployment-and-playing-with-invocations/">Soroban CLI basics: deployment and playing with invocations</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/soroban-offices-game-smart-contract/">Soroban offices game smart contract</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/lottery-smart-contract-with-soroban/">Lottery smart contract with Soroban</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/vault-smart-contract-with-soroban/">Vault smart contract with Soroban</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/rustwasm-receive-js-nested-arrays-as-parameters/">RustWASM: receive js (nested) arrays as parameters</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/personal-notes-on-elliptic-curve-pairings/">Personal notes on Elliptic curve pairings</a><span class="date"></span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/zokratesrustwasm-personal-notes-on-verifying-zokrates-built-proofs-with-rustwasm/">Zokrates+Rust+WASM: personal notes on verifying zokrates built proofs with rustwasm</a><span class="date"></span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/rust-groth16-proof-verification-from-scratch/">Rust: Groth16 Proof Verification From Scratch</a><span class="date"></span><span class="tag">notes</span></div>
+        <div class="entry"><a href="./writeup/rust-wasm-with-no-std-allocator/">Rust: wasm with no std allocator</a><span class="date"></span></div>
+        <div class="entry"><a href="./writeup/how-i-built-this-blog/">How I built this blog</a><span class="date"></span></div>
+    </div>
 
-(zero-depe...</p>
-    <a href="./post/44/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>08/02/2026</p>
-    <h3><a href="./post/43/post.html">Flip the QAP! Witness Encryption for DCAP in Practice (and Rust) &#128215</a></h3>
-    <p class="subtitle">
-
-> I'm not a cryptographer, just a curious person working with applied cryptography to solve distributed systems problems. Feel free to call out any incorrect/imprecise maths, constraints...</p>
-    <a href="./post/43/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>19/01/2026</p>
-    <h3><a href="./post/42/post.html">Practical Proof Of Cloud with TDX <> vTPM Dual Attestation copy &#128215</a></h3>
-    <p class="subtitle">
-
-## Problem
-
-TDX attestation proves that your code is running inside a hardware-isolated Trust Domain with specific measurements. Intel's Quoting Enclave signs the quote, and you can veri...</p>
-    <a href="./post/42/post.html">read more</a>
-    </li>
-    
-    <li>
-    <h3 class="year"><p>2025</p></h3>
-    </li>
-    
-    <li>
-    <p>14/10/2025</p>
-    <h3><a href="./post/40/post.html">User Space Interface Side Channel Attacks on TEEs: From Inferring Secrets To Censorship &#128215</a></h3>
-    <p class="subtitle">
-
-Also posted at https://x.com/heytdep/status/1978172938206802036. 
-
-Last week I posted a thread on how [wiretap.fail](https://wiretap.fail/) works and how it affects web3 products that ar...</p>
-    <a href="./post/40/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>04/09/2025</p>
-    <h3><a href="./post/39/post.html">TEEs <> Stellar Data Workflows: a PoC &#128215</a></h3>
-    <p class="subtitle">
-
-As promised in the last [writeup](https://heytdep.github.io/post/38/post.html), here are some updates on leveraging TEEs for complex blockchain data workflows, specifically on the Stella...</p>
-    <a href="./post/39/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>04/09/2025</p>
-    <h3><a href="./post/38/post.html">TEEs for Trustless Complex Data Workflows For Blockchain Apps &#128215</a></h3>
-    <p class="subtitle">
-
-We're used to having two options when building complex data infrastructures for blockchain based apps:
-
-1. Run the whole data flow, including blockchain clients, locally and have our use...</p>
-    <a href="./post/38/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>17/08/2025</p>
-    <h3><a href="./post/37/post.html">Sandboxed Quote Generation, Leveraging Report Data and Dynamically Supporting Multiple Applications Within The Same TDX VM &#128215</a></h3>
-    <p class="subtitle">
-
-An interesting aspect of the new dstack research directions shared in San Francisco was the evolution of how the virtualization layout of trusted domains looks.
-If we are already virtua...</p>
-    <a href="./post/37/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>14/08/2025</p>
-    <h3><a href="./post/36/post.html">Personal thoughts on Key Management Services <> Trusted Execution Environments and Exploring Possible Alternatives &#128215</a></h3>
-    <p class="subtitle">
-
-During SBC I had the plasure of seeing the Phala team's talk about Phala Cloud's current dstack implementation and what's in for the future; exciting stuff.
-
-Part of the current (and fut...</p>
-    <a href="./post/36/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>26/07/2025</p>
-    <h3><a href="./post/35/post.html">Building Blocks For Tplus Consensus &#128216</a></h3>
-    <p class="subtitle">
-
-**How Tplus's First Releases Will Deal with Consensus**
-
-As any TEE-based technology that cares about security and safety at tplus we've been exploring different approaches to tackle bot...</p>
-    <a href="./post/35/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/34/post.html">How Do Leader Based Consensus Mechanisms Look Like on TEEs? &#128216</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/34/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>06/06/2025</p>
-    <h3><a href="./post/33/post.html">Diving into Leader Rotation Mechanisms for TEE Backed Clusters &#128215</a></h3>
-    <p class="subtitle">
-
-One common approach for applications that are based on TEEs is to gain performance by committing state through a single peer (leader peer), but relying on a fallback path in case the lea...</p>
-    <a href="./post/33/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>17/05/2025</p>
-    <h3><a href="./post/32/post.html">[Draft] Imagining a Decentralized Cloud Computation Infrastructure: blockchains, TEEs and CR &#128216</a></h3>
-    <p class="subtitle">
-
-> Disclaimer: this post aims to start an open discussion by bringing in some sparse concepts. 
-
-Won't introduct decentralized systems and why they're crucial, but right now there's one m...</p>
-    <a href="./post/32/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>03/04/2025</p>
-    <h3><a href="./post/31/post.html">Understanding Helios and Exploring Light Clients' Affinity to TEEs &#128215</a></h3>
-    <p class="subtitle">
-
-Decentralized TEE-based applications that interface with blockchains need to plug in a trusted source of data for said blockchains. One approach is to run full nodes within a TEE, but an...</p>
-    <a href="./post/31/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>30/01/2025</p>
-    <h3><a href="./post/30/post.html">[Draft] Designing a TEE App Resistant to Hacked Chips &#128216</a></h3>
-    <p class="subtitle">
-
-TEEs are awesome, but they can be compromised and in itself pose a challenge around availability that also greatly impacts security (NB: this last connection to security will be clearer ...</p>
-    <a href="./post/30/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/29/post.html">[Draft] Towards a More Modular Dstack Implementation &#128216</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/29/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>27/02/2025</p>
-    <h3><a href="./post/28/post.html">Running Helios Clients on GCP TDX TEE For Attestable Data &#128215</a></h3>
-    <p class="subtitle">
-
-Assuming the reader already knows what [Helios](https://github.com/a16z/helios) is, I explore how to run a Helios light client within a Trusted Execution Environment to attest over netwo...</p>
-    <a href="./post/28/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>22/02/2025</p>
-    <h3><a href="./post/27/post.html">Understanding vTPM+TDX Attestation and Quoting Through the TSM ABI &#128215</a></h3>
-    <p class="subtitle">
-
-This article is aimed at anyone that wants to understand how the vTPM<>TDX combined attestation works. Additionally, I talk a bit about using the ABI exposed by the Trusted Security Modu...</p>
-    <a href="./post/27/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>30/01/2025</p>
-    <h3><a href="./post/26/post.html">Stellar And MeV: Deep Dive into Optimal Tx Ordering, Censorhip, and Eclipse MeV copy &#128215</a></h3>
-    <p class="subtitle">
-
-In this article I expand a bit more about my new MeV + node behavior verification proposal by demistifying the PoW-based hashing attack vector for optimal ordering. 
-
-<br/>
-
-MeV has alwa...</p>
-    <a href="./post/26/post.html">read more</a>
-    </li>
-    
-    <li>
-    <h3 class="year"><p>2024</p></h3>
-    </li>
-    
-    <li>
-    <p>11/12/2024</p>
-    <h3><a href="./post/25/post.html">The First Modular Confidential VM Network Implementation is Here &#128215</a></h3>
-    <p class="subtitle">
-
-I've recently been introduced to the world of trusted execution environments (TEEs), mainly around the topic of confidential virtual machines (CVM). Dstack is pretty much the only design...</p>
-    <a href="./post/25/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>06/11/2024</p>
-    <h3><a href="./post/24/post.html">Guest Level Opt In Reentrancy On The Soroban Virtual Machine? &#128215</a></h3>
-    <p class="subtitle">
-
-TLDR I just opened a core PR to add opt-in reentrancy to Soroban. Calling all developers to discuss this!
-
-# Back Story and Proposal
-
-I kind of always gave for granted that Soroban would...</p>
-    <a href="./post/24/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>05/11/2024</p>
-    <h3><a href="./post/23/post.html">One Step Closer To DeFi: New Horizons and Why I Started Adding Protocol Utilities In Zephyr copy &#128215</a></h3>
-    <p class="subtitle">
-
-Soroban needs to grow, let's accelerate that.
-
-# Preamble
-
-I think that anyone who is in the Soroban ecosystem right now notices that we're undergoing a stagnant situation. The tech is g...</p>
-    <a href="./post/23/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>04/11/2024</p>
-    <h3><a href="./post/22/post.html">My Meridian 2024 Talks Recap &#128215</a></h3>
-    <p class="subtitle">
-
-TLDR this is the recap of my two Meridian talks. #Meridian2024 was actually the first Meridian I could attend, but the wait for
- meeting irl the folks I worked with for the last years wa...</p>
-    <a href="./post/22/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>15/10/2024</p>
-    <h3><a href="./post/21/post.html">Meridian 2024 SVM Talk Technical References &#128215</a></h3>
-    <p class="subtitle">
-
-If you've made it to this post, it likely means that you are interested in the more technical aspect of my [Meridian 2024](https://meridian.stellar.org) talk about the soroban virtual ma...</p>
-    <a href="./post/21/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>19/08/2024</p>
-    <h3><a href="./post/20/post.html">Proposing a Safe On Chain Actions Standard through Smart Wallets &#128215</a></h3>
-    <p class="subtitle">
-
-In a [recent post](https://blog.xycloo.com/blog/blend-bot-with-zephyr-and-smart-accounts), XyclooLabs showed a proof-of-concept for using smart accounts for on-chain actions deployed on ...</p>
-    <a href="./post/20/post.html">read more</a>
-    </li>
-    
-    <li>
-    <h3 class="year"><p>2023</p></h3>
-    </li>
-    
-    <li>
-    <p>22/09/2023</p>
-    <h3><a href="./post/18/post.html">Going through Stellar Mainnet whole History with rs ingest copy &#128215</a></h3>
-    <p class="subtitle">
-
-For those who do not know it, I've been working on a rust crate that allows for custom ingestion from a stellar core captive process. The crate is [rs-ingest](https://github.com/xycloo/r...</p>
-    <a href="./post/18/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>2/10/2023</p>
-    <h3><a href="./post/17/post.html">Update 1: Soroban Zig sdk &#128215</a></h3>
-    <p class="subtitle">
-
-I recently started learning Zig and as commitment to learning this language, which seems ergonomic and pretty close to Rust
-in terms of syntax, I started building a soroban SDK for it. 
-...</p>
-    <a href="./post/17/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p>Jan 16, 2023</p>
-    <h3><a href="./post/16/post.html">Testing the first working version of Soroban Analyzer &#128215</a></h3>
-    <p class="subtitle">
-
-Hey there! It's been a couple of months since I wrote here. But I'm back with an interesting hands-on article about using [Soroban Analyzer](https://github.com/xycloo/soroban-analyzer)...</p>
-    <a href="./post/16/post.html">read more</a>
-    </li>
-    
-    <li>
-    <h3 class="year"><p>2022</p></h3>
-    </li>
-    
-    <li>
-    <p>events()</p>
-    <h3><a href="./post/15/post.html">Playing with Soroban events &#128215</a></h3>
-    <p class="subtitle"> handle in the environment that allows us to publish events. In this post we'll explore how to publish events, why a contract would publish one, and how to read...</p>
-    <a href="./post/15/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/14/post.html">Rock paper scissors betting smart contract &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/14/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/13/post.html">Soroban advanced auth on the CLI &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/13/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/12/post.html">Now Also Markdown Here &#128216</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/12/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/11/post.html">Soroban commit reveal hashing scheme &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/11/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/10/post.html">Soroban Dutch Auction Smart Contract &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/10/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/9/post.html">Soroban CLI basics: deployment and playing with invocations &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/9/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/8/post.html">Soroban offices game smart contract &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/8/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/7/post.html">Lottery smart contract with Soroban &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/7/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/6/post.html">Vault smart contract with Soroban &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/6/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/5/post.html">RustWASM: receive js (nested) arrays as parameters &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/5/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/4/post.html">Personal notes on Elliptic curve pairings &#128216</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/4/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/3/post.html">Zokrates+Rust+WASM: personal notes on verifying zokrates built proofs with rustwasm &#128216</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/3/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/2/post.html">Rust: Groth16 Proof Verification From Scratch &#128216</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/2/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/1/post.html">Rust: wasm with no std allocator &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/1/post.html">read more</a>
-    </li>
-    
-    <li>
-    <p></p>
-    <h3><a href="./post/0/post.html">How I built this blog &#128215</a></h3>
-    <p class="subtitle">...</p>
-    <a href="./post/0/post.html">read more</a>
-    </li>
-    </ul></nav></div></body>
+    <div id="research" class="section">
+        <p class="research-note">not peer-reviewed research. long-form explorations and loosely structured thinking on topics I find interesting.</p>
+        <div class="research-entry">
+<a class="title-link" href="./research/verifiable-closed-source-tees/">Verifiable Closed Source TEEs</a>
+<div class="snippet">Open source code has become a standard for decentralized protocols and is becoming standard for distributed systems relying on TEEs for trusted computing that i...</div>
+</div>
+    </div>
+</div>
+</body>

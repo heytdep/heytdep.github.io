@@ -1,0 +1,234 @@
+<p><code>Jan 16, 2023</code></p>
+<p>Hey there! It’s been a couple of months since I wrote here. But I’m
+back with an interesting hands-on article about using <a
+href="https://github.com/xycloo/soroban-analyzer">Soroban
+Analyzer</a>.</p>
+<h1 id="what-is-soroban-analyzer">What is Soroban Analyzer</h1>
+<p>Soroban Analyzer is a CLI tool and a crate which you can use to
+detect gas inefficiencies in Soroban rust code.</p>
+<p>The tool makes use of a slightly tweaked fork of Mozilla’s <a
+href="https://github.com/xycloo/soroban-analyzer">rust-code-analysis</a>
+crate to parse into nodes the Rust code.</p>
+<p>The tool’s workflow as I write the article can be described as
+follows: 1. Detect functions that access contract storage, loops, code
+blocks and add them to the <code>Storage</code> objsct. 2. Check if
+loops access contract storage indirectly (through what the tool found on
+step 1). 3. Check if a code block uses storage functions multiple
+times.</p>
+<p>Later in the article I’ll go deeper over why the tool does the above
+checks.</p>
+<h1 id="trying-it-out">Trying it out</h1>
+<p>Let’s try out the tool by having it perform checks on a very simple
+contract that just stores a value (the supply) on the contract’s data,
+which is changed by a function <code>supp(e: Env) -&gt; i128</code> that
+returns the new supply.</p>
+<p>We could write the contract as follows:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="at">#![</span>no_std<span class="at">]</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_sdk::</span><span class="op">{</span>contractimpl<span class="op">,</span> contracttype<span class="op">,</span> Env<span class="op">};</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> TestContract<span class="op">;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> DataKey <span class="op">{</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    Supply<span class="op">,</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> set_supply(e<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> s<span class="op">:</span> <span class="dt">i128</span>) <span class="op">{</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    e<span class="op">.</span>storage()<span class="op">.</span>set(<span class="pp">DataKey::</span>Supply<span class="op">,</span> s)<span class="op">;</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> get_supply(e<span class="op">:</span> <span class="op">&amp;</span>Env) <span class="op">-&gt;</span> <span class="dt">i128</span> <span class="op">{</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    e<span class="op">.</span>storage()<span class="op">.</span>get(<span class="pp">DataKey::</span>Supply)<span class="op">.</span>unwrap()<span class="op">.</span>unwrap()</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> TestContract <span class="op">{</span></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> init(env<span class="op">:</span> Env) <span class="op">{</span></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>        set_supply(<span class="op">&amp;</span>env<span class="op">,</span> <span class="dv">10</span>)<span class="op">;</span></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> supp(e<span class="op">:</span> Env) <span class="op">-&gt;</span> <span class="dt">i128</span> <span class="op">{</span></span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> supply <span class="op">=</span> get_supply(<span class="op">&amp;</span>e)<span class="op">;</span></span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>        <span class="co">// supply decreases</span></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> amount <span class="op">=</span> <span class="dv">2</span><span class="op">;</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>        set_supply(<span class="op">&amp;</span>e<span class="op">,</span> supply <span class="op">-</span> amount)<span class="op">;</span></span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a>        get_supply(<span class="op">&amp;</span>e)</span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a><span class="kw">mod</span> tests <span class="op">{</span></span>
+<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a>    <span class="kw">use</span> <span class="kw">super</span><span class="pp">::</span><span class="op">*;</span></span>
+<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a>    <span class="kw">use</span> <span class="pp">soroban_sdk::</span>Env<span class="op">;</span></span>
+<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>test<span class="at">]</span></span>
+<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> test() <span class="op">{</span></span>
+<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> env <span class="op">=</span> <span class="pp">Env::</span><span class="kw">default</span>()<span class="op">;</span></span>
+<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> contract_id <span class="op">=</span> env<span class="op">.</span>register_contract(<span class="cn">None</span><span class="op">,</span> TestContract)<span class="op">;</span></span>
+<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> client <span class="op">=</span> <span class="pp">TestContractClient::</span>new(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>contract_id)<span class="op">;</span></span>
+<span id="cb1-45"><a href="#cb1-45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-46"><a href="#cb1-46" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>budget()<span class="op">.</span>reset()<span class="op">;</span></span>
+<span id="cb1-47"><a href="#cb1-47" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-48"><a href="#cb1-48" aria-hidden="true" tabindex="-1"></a>        client<span class="op">.</span>init()<span class="op">;</span></span>
+<span id="cb1-49"><a href="#cb1-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-50"><a href="#cb1-50" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> _new_supp <span class="op">=</span> client<span class="op">.</span>supp()<span class="op">;</span></span>
+<span id="cb1-51"><a href="#cb1-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-52"><a href="#cb1-52" aria-hidden="true" tabindex="-1"></a>        <span class="kw">extern</span> <span class="kw">crate</span> std<span class="op">;</span></span>
+<span id="cb1-53"><a href="#cb1-53" aria-hidden="true" tabindex="-1"></a>        <span class="pp">std::println!</span>(<span class="st">&quot;non optimized: </span><span class="sc">\n</span><span class="st"> {}&quot;</span><span class="op">,</span> env<span class="op">.</span>budget())<span class="op">;</span></span>
+<span id="cb1-54"><a href="#cb1-54" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-55"><a href="#cb1-55" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Now it’s time to try out soroban analyzer, and see if it’s able to
+pick up something:</p>
+<pre><code>$ soroban-analyzer --all
+
+
+[+] Soroban Analyzer started. Disclaimer: still under development, the tool&#39;s scope is currently very limited, expect bugs and breaking changes may occur. 
+Report bugs or suggestions in the github issues page: https://github.com/xycloo/soroban-analyzer/issues.
+
+
+ [DEBUG] Functions found directly or indirectly accessing contract state: 
+
+&gt; set_supply at line 11
+&gt; get_supply at line 15
+&gt; init at line 21
+&gt; supp at line 25
+&gt; test at line 41
+
+
+
+[+] Starting checks 
+
+[lib.rs] Lines 25-33: the function `get_supply` defined at line 15 accessed contract state and is used multiple times inside the block. It may be better to use `get_supply` once and save it in memory. 
+
+</code></pre>
+<p>The analyzer picked something up, let’s see what it’s about.</p>
+<h1 id="evaluating-the-results">Evaluating the results</h1>
+<p>The analzyer complains about the block 25-33, i.e the contract’s
+<code>supp</code> function, and it tells us that
+<code>the function 'get_supply' defined at line 15 accessed contract state and is used multiple times inside the block.</code>
+Later on, the analyzer suggests to
+<code>use 'get_supply' once and save it in memory</code>.</p>
+<p>The analyzer tells us this since the <code>get_supply</code> function
+accesses contract storage
+(<code>e.storage().get(DataKey::Supply)</code>), and accessing contract
+storage is more expensive than other in-memory operations.</p>
+<p>In this case, the analyzer is saying that using
+<code>get_supply</code> another time at line 32 is unnecessary and
+expensive, and suggests us to simply re-use the <code>supply</code> var
+we defined at line 26. So something like this:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">fn</span> supp(e<span class="op">:</span> Env) <span class="op">-&gt;</span> <span class="dt">i128</span> <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> supply <span class="op">=</span> get_supply(<span class="op">&amp;</span>e)<span class="op">;</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="co">// supply decreases</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> amount <span class="op">=</span> <span class="dv">2</span><span class="op">;</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    set_supply(<span class="op">&amp;</span>e<span class="op">,</span> supply <span class="op">-</span> amount)<span class="op">;</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>    supply <span class="op">-</span> amount</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>As you can see, rather than re-accessing the storage to return the
+new supply, we simply determine it with a subtraction operation. Which
+results cheaper:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">optimized:</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">Costs:</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="ex">-</span> CPU Instructions: 42737</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="ex">-</span> Memory Bytes: 4547</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="ex">non</span> optimized:</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="ex">Costs:</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="ex">-</span> CPU Instructions: 52062</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="ex">-</span> Memory Bytes: 5573</span></code></pre></div>
+<details>
+<summary>
+See test code
+</summary>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="at">#![</span>no_std<span class="at">]</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">soroban_sdk::</span><span class="op">{</span>contractimpl<span class="op">,</span> contracttype<span class="op">,</span> Env<span class="op">};</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">struct</span> TestContract<span class="op">;</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contracttype<span class="at">]</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="kw">pub</span> <span class="kw">enum</span> DataKey <span class="op">{</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    Supply<span class="op">,</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> set_supply(e<span class="op">:</span> <span class="op">&amp;</span>Env<span class="op">,</span> s<span class="op">:</span> <span class="dt">i128</span>) <span class="op">{</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    e<span class="op">.</span>storage()<span class="op">.</span>set(<span class="pp">DataKey::</span>Supply<span class="op">,</span> s)<span class="op">;</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> get_supply(e<span class="op">:</span> <span class="op">&amp;</span>Env) <span class="op">-&gt;</span> <span class="dt">i128</span> <span class="op">{</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>    e<span class="op">.</span>storage()<span class="op">.</span>get(<span class="pp">DataKey::</span>Supply)<span class="op">.</span>unwrap()<span class="op">.</span>unwrap()</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="at">#[</span>contractimpl<span class="at">]</span></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a><span class="kw">impl</span> TestContract <span class="op">{</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> init(env<span class="op">:</span> Env) <span class="op">{</span></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>        set_supply(<span class="op">&amp;</span>env<span class="op">,</span> <span class="dv">10</span>)<span class="op">;</span></span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> supp(e<span class="op">:</span> Env) <span class="op">-&gt;</span> <span class="dt">i128</span> <span class="op">{</span></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> supply <span class="op">=</span> get_supply(<span class="op">&amp;</span>e)<span class="op">;</span></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>        <span class="co">// supply decreases</span></span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> amount <span class="op">=</span> <span class="dv">2</span><span class="op">;</span></span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>        set_supply(<span class="op">&amp;</span>e<span class="op">,</span> supply <span class="op">-</span> amount)<span class="op">;</span></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>        get_supply(<span class="op">&amp;</span>e)</span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> supp_opt(e<span class="op">:</span> Env) <span class="op">-&gt;</span> <span class="dt">i128</span> <span class="op">{</span></span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> supply <span class="op">=</span> get_supply(<span class="op">&amp;</span>e)<span class="op">;</span></span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a>        <span class="co">// supply decreases</span></span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> amount <span class="op">=</span> <span class="dv">2</span><span class="op">;</span></span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a>        set_supply(<span class="op">&amp;</span>e<span class="op">,</span> supply <span class="op">-</span> amount)<span class="op">;</span></span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a>        supply <span class="op">-</span> amount</span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a><span class="kw">mod</span> tests <span class="op">{</span></span>
+<span id="cb5-47"><a href="#cb5-47" aria-hidden="true" tabindex="-1"></a>    <span class="kw">use</span> <span class="kw">super</span><span class="pp">::</span><span class="op">*;</span></span>
+<span id="cb5-48"><a href="#cb5-48" aria-hidden="true" tabindex="-1"></a>    <span class="kw">use</span> <span class="pp">soroban_sdk::</span>Env<span class="op">;</span></span>
+<span id="cb5-49"><a href="#cb5-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-50"><a href="#cb5-50" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>test<span class="at">]</span></span>
+<span id="cb5-51"><a href="#cb5-51" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> test() <span class="op">{</span></span>
+<span id="cb5-52"><a href="#cb5-52" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> env <span class="op">=</span> <span class="pp">Env::</span><span class="kw">default</span>()<span class="op">;</span></span>
+<span id="cb5-53"><a href="#cb5-53" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> contract_id <span class="op">=</span> env<span class="op">.</span>register_contract(<span class="cn">None</span><span class="op">,</span> TestContract)<span class="op">;</span></span>
+<span id="cb5-54"><a href="#cb5-54" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> client <span class="op">=</span> <span class="pp">TestContractClient::</span>new(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>contract_id)<span class="op">;</span></span>
+<span id="cb5-55"><a href="#cb5-55" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-56"><a href="#cb5-56" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>budget()<span class="op">.</span>reset()<span class="op">;</span></span>
+<span id="cb5-57"><a href="#cb5-57" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-58"><a href="#cb5-58" aria-hidden="true" tabindex="-1"></a>        client<span class="op">.</span>init()<span class="op">;</span></span>
+<span id="cb5-59"><a href="#cb5-59" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-60"><a href="#cb5-60" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> _new_supp <span class="op">=</span> client<span class="op">.</span>supp()<span class="op">;</span></span>
+<span id="cb5-61"><a href="#cb5-61" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-62"><a href="#cb5-62" aria-hidden="true" tabindex="-1"></a>        <span class="kw">extern</span> <span class="kw">crate</span> std<span class="op">;</span></span>
+<span id="cb5-63"><a href="#cb5-63" aria-hidden="true" tabindex="-1"></a>        <span class="pp">std::println!</span>(<span class="st">&quot;non optimized: </span><span class="sc">\n</span><span class="st"> {}&quot;</span><span class="op">,</span> env<span class="op">.</span>budget())<span class="op">;</span></span>
+<span id="cb5-64"><a href="#cb5-64" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-65"><a href="#cb5-65" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-66"><a href="#cb5-66" aria-hidden="true" tabindex="-1"></a>    <span class="at">#[</span>test<span class="at">]</span></span>
+<span id="cb5-67"><a href="#cb5-67" aria-hidden="true" tabindex="-1"></a>    <span class="kw">fn</span> test_opt() <span class="op">{</span></span>
+<span id="cb5-68"><a href="#cb5-68" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> env <span class="op">=</span> <span class="pp">Env::</span><span class="kw">default</span>()<span class="op">;</span></span>
+<span id="cb5-69"><a href="#cb5-69" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> contract_id <span class="op">=</span> env<span class="op">.</span>register_contract(<span class="cn">None</span><span class="op">,</span> TestContract)<span class="op">;</span></span>
+<span id="cb5-70"><a href="#cb5-70" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> client <span class="op">=</span> <span class="pp">TestContractClient::</span>new(<span class="op">&amp;</span>env<span class="op">,</span> <span class="op">&amp;</span>contract_id)<span class="op">;</span></span>
+<span id="cb5-71"><a href="#cb5-71" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-72"><a href="#cb5-72" aria-hidden="true" tabindex="-1"></a>        env<span class="op">.</span>budget()<span class="op">.</span>reset()<span class="op">;</span></span>
+<span id="cb5-73"><a href="#cb5-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-74"><a href="#cb5-74" aria-hidden="true" tabindex="-1"></a>        client<span class="op">.</span>init()<span class="op">;</span></span>
+<span id="cb5-75"><a href="#cb5-75" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-76"><a href="#cb5-76" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> _new_supp <span class="op">=</span> client<span class="op">.</span>supp_opt()<span class="op">;</span></span>
+<span id="cb5-77"><a href="#cb5-77" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-78"><a href="#cb5-78" aria-hidden="true" tabindex="-1"></a>        <span class="kw">extern</span> <span class="kw">crate</span> std<span class="op">;</span></span>
+<span id="cb5-79"><a href="#cb5-79" aria-hidden="true" tabindex="-1"></a>        <span class="pp">std::println!</span>(<span class="st">&quot;optimized: </span><span class="sc">\n</span><span class="st"> {}&quot;</span><span class="op">,</span> env<span class="op">.</span>budget())<span class="op">;</span></span>
+<span id="cb5-80"><a href="#cb5-80" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-81"><a href="#cb5-81" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+</details>
+<h1 id="conclusion">Conclusion</h1>
+<p>There’s still a lot of work to do on this tool, and if you have any
+suggestions, please let us know by opening an issue <a
+href="https://github.com/xycloo/soroban-analyzer/issues">here</a>.</p>

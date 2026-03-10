@@ -1,0 +1,908 @@
+<h1
+id="verifiable-closed-source-trusted-execution-environments-for-high-risk-complex-applications.">Verifiable
+Closed Source Trusted Execution Environments For High Risk Complex
+Applications.</h1>
+<p>Open source code has become a standard for decentralized protocols
+and is becoming standard for distributed systems relying on TEEs for
+trusted computing that intersect with blockchains.</p>
+<p>While this is ultimately a good thing, the advent of commercial LLMs
+used for penetration testing raises serious concerns around big open
+source codebases where the LLM can be handed off the whole program
+source. While complex systems must carry such scans internally it’s not
+trivial to be always ahead of a better structured prompt in the hands of
+a malicious party. The bottom line; source code analysis became much
+faster thanks to LLM leading to an increase of vulnerabilities found in
+the program’s logic, typestructure, dependencies, etc.</p>
+<p>This is promising for reaching much higher security standards, but
+also scary for complex systems that are high-risk such as financial
+applications, especially when they operate on decentralized venues by
+holding cryptographic keys that authenticate directly to user funds.</p>
+<p>For such applications a thoroguh internal continuous scan and
+competitive bounty program is recommended even after internal audits,
+but the attack vector perists especially in this timeframe where
+pentesting using LLMs is still not widely explored and there’s likely
+many wildcards that one just can’t reasonably predict.</p>
+<p>Additionally, closing source is not the only concern. LLMs are
+increasingly making reverse engineering of binaries accurate, and it’s
+thus only a matter of time until “vibe hacking” can be efficiently
+carried out on the binaries themselves.</p>
+<p>Closed source code however offers no auditability and no trust, hence
+there’s virtually no use in relying on trusted computing for a
+“decentralized” system if we cannot trust whatever the measurements
+produce. Additionally, closing the source of a codebase which you must
+know is behaving in a certain way and not being even able to run the
+protocol yourself sounds like an impossibility in a decentralized
+system.</p>
+<p><em>NB:</em> throughout the document the word decentralized is used
+to describe a system that has the charateristics to potentially be
+decentralized, not that it effectively is decentralized.</p>
+<p>I explain however how trusted execution environment enable for a
+fundamentally different perspective when it comes to closing the source
+of the program. By combining key concepts from the confidentiality and
+integrity guarantees of TEEs, formal verification, and a cerimony setup
+we map a non client-side reproducible measurement to a guarantee that
+the digest mapping to that measurement corresponds to a program whose
+execution logic is deterministically guaranteed to not break what is
+defined in the specification.</p>
+<p>I observe how the biggest limit of such system is actually backdoors
+through specifications that purposefully do not inlcude conditions that
+are crucial but may be overlooked by a user that does not know how the
+system works at a low level. I solve this by requiring mandatory
+non-interference in the trusted verification step. While this works, it
+bloats the specification requirements requiring more effort from the
+development teams compared to just open sourcing the code. Another
+additional layer I research is collective assembly of the specification,
+where participants that are able to have verification fail with accepted
+properties are elegible for a bounty.</p>
+<p>Lastly, I observe also how the attack surface gets dramatically
+reduced compared to source code analysis.</p>
+<h1 id="why-formal-verification">Why Formal Verification</h1>
+<p>This document focuses on formal verification techniques to restrain
+the program’s execution to a verifiable set of properties. While some
+degree of control over the execution can be carried through virtualized
+isolation technologies such as sandboxes, there are several limitations
+to this approach in comparison to what I propose with formal
+verification.</p>
+<p>Some of the strongest arguments against sandboxing techniques:</p>
+<ul>
+<li>the sanbox itself can be exploited.</li>
+<li>context switches and virtualization kill performance.</li>
+<li>sandboxing cannot verify most properties without a heavily host
+based virtual machine, at which point the obfuscation becomes minimal
+defeating the purpose of such a system in the first place.</li>
+</ul>
+<p>The only advantage that sandboxing offers is that once the sandbox is
+assumed to be completely safe the guarantees are stronger than formal
+verification where the specification may not explicitly cover certain
+edges.</p>
+<h2 id="about-llms">About LLMs</h2>
+<p>A natural question is whether AI models running inside a TEE could
+just replace the formal verification pipeline entirely; i.e verifying
+properties directly through reasoning rather than deterministic proof.
+This might look like it reduces the formal methods expertise required,
+but it introduces a fundamental problem: AI verification is
+non-deterministic, susceptible to hallucination and unsound reasoning,
+and offers no hard guarantee of convergence. I actually invert this
+relationship in the protocol I propose here. Rather than replacing
+deterministic verification with AI, I use deterministic verification as
+an anchor that makes AI safe to deploy in the surrounding workflow. The
+non-determinism of AI is absorbed at the spec boundary; whatever
+property the AI proposes either passes or fails deterministic
+verification, and that result is reproducible and unchallengeable for a
+given specification. This gives the AI a tight feedback loop; propose a
+property, observe the deterministic outcome, refine, re-submit,
+essentially the formal verification system becomes an objective oracle
+for property satisfaction that grounds whatever creative exploration the
+AI is doing. Worth noting tho that this oracle only tells you whether a
+property holds, not whether it’s meaningful or security-relevant; the
+relevance filter comes from mechanisms I describe below.</p>
+<p>AI is useful at two slightly different points in this protocol.
+First, for honest developers crafting their own specifications: an AI
+model can systematically map a codebase to a formal spec, surfacing
+properties the developer might not think to declare. This is the
+cooperative case where developer genuinely wants to maximize the trust
+guarantee for their users, and the deterministic pipeline serves as a
+backstop ensuring the AI-generated spec actually holds against the code.
+Second, and this is actually the more interesting case, AI strengthens
+the collective speccing mechanism I described earlier. External
+participants can use AI to blackbox-guess what properties <span
+class="math inline">\(S\)</span> might be missing based on domain
+expertise and observable behavior (e.g API surface, documented
+functionality, known patterns for the application category), accepting
+the stake risk if they’re confident in the findings. That said the more
+powerful variant is running an audited, sandboxed LLM inside a
+proof-of-cloud TEE that has direct access to the source code during the
+collective speccing window. This TEE-hosted model can execute multiple
+adversarial rounds of auto-research against the code; proposing
+candidate properties, checking them against the existing spec for
+redundancy, and refining iteratively, all without the source ever
+leaving the enclave. What leaves the enclave are the proposed properties
+themselves, which reveal behavioral facts about the program (i.e what it
+must guarantee) without exposing implementation details (i.e how it does
+it); since the formal specification language constrains predicates to
+input/output behavior, properties structurally cannot reference internal
+state. This is the intended trust signal, not a confidentiality
+violation.</p>
+<blockquote>
+<p>NB: the LLM image must itself be audited and reproducible so that
+participants can verify the model running inside the TEE is the expected
+one. I’m slightly hand-waving the auditing complexity here; what
+“audited” means operationally for an LLM is still a bit of an open
+question, but at minimum it means a reproducible image whose hash
+participants can independently verify.</p>
+</blockquote>
+<p>I think the right architecture for the AI layer is actually pyramidal
+rather than a flat committee. You have an open model sitting at the
+base; it runs inside the TEE with full access to the source code and the
+existing specification <span class="math inline">\(S\)</span>, and it
+does the heavy lifting, proposing candidate properties through
+adversarial auto-research against the code, iterating across rounds.
+Above it sits a frontier model that never touches the source code but
+receives the proposed properties and evaluates them against <span
+class="math inline">\(S\)</span> for redundancy and whether they’re
+actually meaningful as security properties, i.e a pre-filter before
+anything hits the formal verification pipeline. This separation isn’t
+arbitrary tho; it maps trust boundaries to capability tiers. The open
+model is inside the enclave with secrets so it must be auditable and
+reproducible; that’s feasible for open-weight models but not for
+proprietary frontier models. The frontier model only ever operates on
+public-facing formal properties so it never needs enclave access and its
+opacity is acceptable.</p>
+<p>The pyramidal structure also enables something a flat committee just
+doesn’t have, which is a training dynamic. The open model doesn’t just
+propose and forget; it actually accumulates domain competence across
+rounds because it trains on feedback from three sources: the frontier
+model’s redundancy/validity judgments, the verification pipeline’s
+deterministic pass/fail results, and the structure of the confidential
+code and specs it has access to inside the enclave. Essentially the open
+model gets meaningfully better at proposing properties that are novel,
+valid, and security-relevant over successive rounds rather than starting
+from scratch each time. I think the frontier model’s feedback is a
+slightly underappreciated piece here; it encodes reasoning about what
+actually constitutes a meaningful security property for the application
+category, knowledge that the deterministic verifier alone can’t provide
+since it only answers “does this hold” not “does this matter.” The
+verification pipeline gives you correctness but the frontier model is
+what gives you relevance.</p>
+<p>Given that constraint, this allows AI to heuristically improve
+specification coverage with full context (source + spec) under a trust
+model that doesn’t require trusting whoever initiated the query. The
+frontier model’s pre-filtering for redundancy and validity, combined
+with independent frontier model instances scoring proposed properties on
+safety-importance, means the system filters toward specifications that
+are not just satisfiable but actually meaningful. Turns out this
+combines well with the staking mechanism that penalizes trivial or
+redundant submissions; you end up with three complementary filters that
+cover different axes: deterministic verification catches incorrect
+properties, economic stake discourages unserious submissions, and the
+frontier model layer filters for both redundancy and relevance. The core
+security guarantee remains strictly deterministic; AI operates purely in
+the spec-crafting layer where its non-determinism is contained by the
+verification pipeline below it, tho it’s worth being explicit that
+verification eliminates false positives (properties that don’t actually
+hold) but not false negatives (important properties never proposed). The
+completeness of spec coverage ultimately depends on the collective
+speccing incentive structure, not on the verification pipeline
+alone.</p>
+<hr />
+<h1 id="overview">Overview</h1>
+<p>I will first describe the protocol at a high level and the goals and
+non goals of the system, then go over the specific components one by
+one.</p>
+<p>The proposed protocol is simple in its structure; developers upload
+their code and associated specification to a <em>distributor</em>
+trusted execution environment that will only share the compiled program
+with designated nodes and will only distribute the source code to
+entities that satisfy the developer’s conditions. A set <em>v</em> of
+verifier TEEs will then request the source code; in the base protocol
+each <span class="math inline">\(v_i\)</span> receives the full source
+inside its own enclave and verifies independently, with confidentiality
+relying on the TEE hardware guarantees. An aspirational extension using
+MPC to split the source across <span class="math inline">\(v_i\)</span>
+so that up to <em>f</em> compromised chips don’t break confidentiality
+is discussed in <a href="#fn1" class="footnote-ref" id="fnref1"
+role="doc-noteref"><sup>1</sup></a> but remains a research direction.
+<em>v</em> then executes the formal verification program against the
+provided spec. If the verification against the provided specification
+passes then the measurement of the compiled binary is endorsed by
+<em>v</em>. Once the endorsement is granted it cannot be revoked unless
+a contradicting more recent signature from <em>v</em> is provided <a
+href="#fn2" class="footnote-ref" id="fnref2"
+role="doc-noteref"><sup>2</sup></a>, in which case we assume that the
+newer signature overwrites the previous one.</p>
+<p><em>NB:</em> For the scope of this document, whoever operates the
+above TEE must be directly trusted by the operator not to physically
+compromise the chip and thus gain access to the source code. In a
+scalable protocol, the distributor TEE is actually a set of nodes
+respecting a certain defined topology <a href="#fn3"
+class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a>
+splitting the work through MPC so that at least <span
+class="math inline">\(f\)</span> of those chips must be physically
+compromised to break source code integrity.</p>
+<h3 id="security-goals">Security Goals</h3>
+<p>The system provides bounded behavioral guarantees for closed-source
+programs; given a formal specification <em>S</em> and input bounds
+<em>B_max</em>, a quorum of <em>k</em>-of-<em>N</em> verification TEEs
+proves that the program with measurement <em>M</em> satisfies <em>S</em>
+for all inputs within <em>B_max</em>. The source code remains
+confidential (never leaves TEE hardware) and is destroyed after
+verification.</p>
+<p>The guarantee holds as long as less than <em>k</em> verification TEEs
+are physically compromised. For information flow properties, the
+specification is complete by default as non-interference is mandatory in
+the trusted verification step, making sure that no undeclared data
+leakage exists. For all other property classes, the guarantee is limited
+to what <em>S</em> explicitly declares.</p>
+<h3 id="out-of-scope-non-goals">Out of Scope: Non-Goals</h3>
+<p>The following scenarios are not considered in this document:</p>
+<ul>
+<li>Access to source code thorugh social engineering of dev teams /
+privileged team access. We assume that the codebase is behind NDA and
+the dev team is honest.</li>
+<li>Compromise of the trusted setup that verifies the
+specification.</li>
+</ul>
+<h1 id="the-trusted-cerimony">The Trusted Cerimony</h1>
+<h2 id="setup-phase">Setup Phase</h2>
+<p>The developer (<em>D</em>) publishes the measurement (<em>M</em>) of
+the binary, a specification composed of a set of properties <span
+class="math inline">\(S = \{P_1, .., P_n\}\)</span> expressed in a
+formal specification language and input bounds <span
+class="math inline">\(B_{max}\)</span> defining the max input sizes up
+to which the properties must hold.</p>
+<p><em>NB:</em> the binary must be a reproducible build.</p>
+<p>The verification node set <span class="math inline">\(v\)</span> is
+deined and provisioned according to the required quorum topology<a
+href="#fn4" class="footnote-ref" id="fnref4"
+role="doc-noteref"><sup>4</sup></a>. Each node <span
+class="math inline">\(v_i\)</span> in <span
+class="math inline">\(v\)</span> boots with the open-source verification
+software and produces quotes so that external users can validate that
+<span class="math inline">\(v\)</span> is indeed a trusted setup. <span
+class="math inline">\(v_i\)</span>’s boot also creates the
+<em>“attested”</em> keypair whose public key (<span
+class="math inline">\(pkey_i\)</span>) is placed in the quote as report
+data.</p>
+<p><em>NB:</em> quorum topology specification already accounts for the
+various potential properties that the trusted setup must guarantee, for
+instance all <span class="math inline">\(v_i\)</span> in <span
+class="math inline">\(v\)</span> must provide proof of cloud
+attestations or be operated by a select set of operators.</p>
+<p>Lastly, <span class="math inline">\(D\)</span> operates or places
+full trust into a distribution node, which may or may not be a TEE
+depending on <span class="math inline">\(D\)</span>’s threat model.</p>
+<h2 id="source-code-submission">Source Code Submission</h2>
+<p><span class="math inline">\(D\)</span> sends the source code to the
+distribution node, which distributes it to each <span
+class="math inline">\(v_i\)</span> over an encrypted channel. Each <span
+class="math inline">\(v_i\)</span> receives the full source inside its
+enclave and executes the verification pipeline independently.</p>
+<h2 id="verification-across-v_i">Verification (across <span
+class="math inline">\(v_i\)</span>)</h2>
+<p>The verification is carried across four steps and a final cleanup
+step:</p>
+<ol type="1">
+<li>compilation and binding the measurement.</li>
+<li>semantic extraction.</li>
+<li>property verification.</li>
+<li>attestation.</li>
+<li>cleanup.</li>
+</ol>
+<h3 id="compilation">Compilation</h3>
+<p>The source code is compiled into the binary <span
+class="math inline">\(B\)</span> and then we check <span
+class="math inline">\(H(B) = M\)</span>, with <span
+class="math inline">\(M\)</span> being the publicly referenced
+measurement.</p>
+<h3 id="semantic-extraction">Semantic Extraction</h3>
+<p>Each <span class="math inline">\(v_i\)</span> takes the source and
+lowers it to an intermediate representation, something like MIR,
+LLVM-IR, or a custom IR depending on the toolchain. From the IR we build
+the control flow graph <span class="math inline">\(G\)</span>, unroll
+all loops up to the bounds in <span
+class="math inline">\(B_{max}\)</span>, and inline all function calls to
+produce a fully expanded graph <span
+class="math inline">\(G&#39;\)</span>. If any loop has data-dependent
+termination that exceeds <span class="math inline">\(B_{max}\)</span>
+then <span class="math inline">\(v_i\)</span> flags it and aborts for
+that property; we need the computation to be statically bounded or we
+simply can’t reason about it. The last step is flattening <span
+class="math inline">\(G&#39;\)</span> into a DAG of primitive
+operations: arithmetic, comparisons, memory ops, I/O. I call this the
+<strong>computation DAG</strong> <span
+class="math inline">\(CR\)</span>, and it’s the semantic object on which
+all the properties will actually be verified.</p>
+<p>Intuitively this is essentially the same transformation that zkVMs do
+on execution traces, RISC Zero for instance unrolls RISC-V into an
+arithmetic circuit<a href="#fn5" class="footnote-ref" id="fnref5"
+role="doc-noteref"><sup>5</sup></a>. The key difference is that here we
+do it statically over all possible inputs within the bounds rather than
+for a single concrete trace, since we want to verify properties
+universally not just witness them for one run.</p>
+<h3 id="property-verification">Property Verification</h3>
+<p>For each property <span class="math inline">\(P_i\)</span> in <span
+class="math inline">\(S\)</span>, <span
+class="math inline">\(v_i\)</span> runs the appropriate verification
+technique on <span class="math inline">\(CR\)</span>. I go through all
+the property classes the system should support here; the choice of
+verification technique is actually tightly coupled to the property
+class.</p>
+<blockquote>
+<p>NB: the properties described below are the result of what needs to be
+checked in financial applications that handle user inventories starting
+from different kinds of mutation inputs, more specifically it’s centered
+around tplus’ core system as a result some properties may be missing for
+other kinds of applications.</p>
+</blockquote>
+<ul>
+<li><strong>Functional correctness.</strong> Bounded model checking over
+all inputs within <span class="math inline">\(B_{max}\)</span> to verify
+that output matches a reference specification. Essentially “does the
+program do what the spec says.”</li>
+</ul>
+<blockquote>
+<p>NB: for programs that interact with stateful external systems
+(blockchains, oracles, contracts), <span
+class="math inline">\(B_{max}\)</span> should be defined with an
+environment model that captures the external system’s possible behavior
+sequences, not just value ranges. For example a blockchain node can
+reorg, return a different header than expected, or drop a confirmed
+transaction; an oracle can go stale or repeat timestamps. The
+environment model constrains the input space to traces the external
+system can actually produce so that BMC doesn’t waste verification
+budget on impossible scenarios or flag false positives for things that
+can’t happen.</p>
+</blockquote>
+<ul>
+<li><strong>Conservation.</strong> SMT solving on path constraints to
+verify <span class="math inline">\(\sum(\text{inputs}) =
+\sum(\text{outputs})\)</span> on every path through <span
+class="math inline">\(CR\)</span>, obviously critical for applications
+where value must be neither created nor destroyed.</li>
+<li><strong>Fairness and symmetry.</strong> Equivalence checking so that
+output must be invariant under permutation of user identities at the
+same priority level, i.e if two users submit the same action at the same
+priority the system treats them identically regardless of who they
+are.</li>
+<li><strong>Information flow (base).</strong> Non-interference via
+self-composition so that changing any user’s private data must change no
+public output byte. This is a default-deny model.</li>
+<li><strong>Information flow (timing).</strong> Additionally checks that
+execution time is independent of private data at declassification
+points, which matters because timing side channels can leak information
+even when the output bytes themselves are clean.</li>
+<li><strong>Determinism.</strong> Structural check on <span
+class="math inline">\(CR\)</span> itself, no non-deterministic nodes in
+the DAG, no <span class="math inline">\(\text{rand}()\)</span>, no
+time-dependent branches. If the program is non-deterministic
+verification is essentially meaningless since you can’t reason about all
+executions.</li>
+</ul>
+<blockquote>
+<p>NB: non-determinism is inevitable at certain parts in most stacks,
+but those non deterministic values (ex: timestamps) won’t be non
+deterministic within the circuit we’re auditing, they’ll be the result
+of a trusted guest os call, which must be open source and thus decoupled
+from the verification we’re targeting here.</p>
+</blockquote>
+<ul>
+<li><strong>Absence of backdoors.</strong> Combines dead code analysis,
+unreachable path analysis, and non-interference to verify there are no
+hidden code paths and no undeclared output channels, essentially that
+the I/O surface is complete. This is actually one of the most important
+classes for the threat model I described earlier since a specification
+backdoor could intentionally omit a code path that exfiltrates data
+through a channel the properties don’t cover.</li>
+<li><strong>Temporal safety.</strong> State machine bounded model
+checking with <span class="math inline">\(K\)</span>-step unrolling to
+verify invariants hold across all event sequences: lock expiry, nonce
+monotonicity, state transitions that must follow a specific order.</li>
+<li><strong>Liveness.</strong> The complement of temporal safety,
+bounded temporal logic with a bound <span
+class="math inline">\(T\)</span> to verify that good outcomes actually
+occur within <span class="math inline">\(T\)</span> steps, e.g a
+liquidation fires before insolvency or a lock gets released before
+timeout. Without this liveness property the system could satisfy all
+safety properties by simply doing nothing.</li>
+<li><strong>Cryptographic API usage.</strong> Structural, taint, and
+temporal analysis for things like nonce uniqueness, key isolation,
+correct parameter usage, tho this is not full cryptographic
+verification, just verifying correct usage of the APIs.</li>
+<li><strong>Arithmetic precision.</strong> Abstract interpretation and
+interval analysis to verify no overflow at intermediate steps and that
+rounding error stays bounded by some <span
+class="math inline">\(\epsilon\)</span>.</li>
+</ul>
+<blockquote>
+<p>NB: each verification tool produces one of three results per
+property: PASS, FAIL with a counterexample, or INCONCLUSIVE for if
+bounds are exceeded or verification timeouts. <span
+class="math inline">\(v_i\)</span> records all of these results which
+will then b e used to either sign a rejection or approval.</p>
+</blockquote>
+<h3 id="attestation">Attestation</h3>
+<p>If all properties pass, <span class="math inline">\(v_i\)</span>
+produces <span class="math inline">\(\sigma_i =
+\text{Sign}_{v_i}(\text{&quot;M satisfies } \{P_1, .., P_n\} \text{ for
+inputs up to } B_{max}\text{&quot;})\)</span> using the
+attestation-linked signing key. The signed message includes <span
+class="math inline">\(M\)</span>, the verified properties with their
+formal statements, <span class="math inline">\(B_{max}\)</span>, a
+timestamp, and <span class="math inline">\(v_i\)</span>’s attestation
+chain proving it’s a fresh TEE running the verifier image.</p>
+<p>If any property fails, <span class="math inline">\(v_i\)</span> signs
+a rejection with the failing property (and maybe a counterexample?). The
+counterexample contains only input/output pairs demonstrating the
+violation so that <span class="math inline">\(D\)</span> can see where
+their program doesn’t match spec i.e no source code leaks even on
+failure.</p>
+<h3 id="cleanup-aggregation-and-lifecycle">Cleanup, Aggregation, and
+Lifecycle</h3>
+<p>After signing, <span class="math inline">\(v_i\)</span> securely
+erases everything: <span class="math inline">\(C\)</span>, <span
+class="math inline">\(B\)</span>, the IR, <span
+class="math inline">\(G\)</span>, <span
+class="math inline">\(G&#39;\)</span>, <span
+class="math inline">\(CR\)</span>. After this step <span
+class="math inline">\(v_i\)</span> holds only <span
+class="math inline">\(\sigma_i\)</span>.</p>
+<p>An aggregator (which can be untrusted, e.g a smart contract or a
+public bulletin board) collects signatures from all <span
+class="math inline">\(N\)</span> verification TEEs. The acceptance
+criterion is straightforward; at least <span
+class="math inline">\(k\)</span> of <span
+class="math inline">\(N\)</span> signatures affirm “<span
+class="math inline">\(M\)</span> satisfies <span
+class="math inline">\(S\)</span> for <span
+class="math inline">\(B_{max}\)</span>.” If met the aggregated
+attestation is published and becomes the publicly verifiable guarantee.
+If fewer than <span class="math inline">\(k\)</span> affirm the ceremony
+fails and the developer must fix the code, update <span
+class="math inline">\(M\)</span>, and re-run.</p>
+<p>The ceremony must be re-run whenever the production code changes (new
+<span class="math inline">\(M\)</span>), the property specification
+<span class="math inline">\(S\)</span> is updated, or the input bounds
+<span class="math inline">\(B_{max}\)</span> are increased.</p>
+<p>Between ceremonies the attestation remains valid as long as nothing
+has changed. In fact the attestation is essentially a snapshot saying
+“at this point in time, this set of trusted verifiers confirmed these
+properties for this exact binary”, thus any change to the inputs
+invalidates it and a revocation must be published<a href="#fn6"
+class="footnote-ref" id="fnref6"
+role="doc-noteref"><sup>6</sup></a>.</p>
+<h1 id="correctness-analysis">Correctness Analysis</h1>
+<h3 id="soundness">Soundness</h3>
+<p>The central guarantee: if <span class="math inline">\(k\)</span> or
+more honest <span class="math inline">\(v_i\)</span> sign “<span
+class="math inline">\(M\)</span> satisfies <span
+class="math inline">\(P\)</span>” then the code with measurement <span
+class="math inline">\(M\)</span> actually satisfies <span
+class="math inline">\(P\)</span> for inputs up to <span
+class="math inline">\(B_{max}\)</span>. I walk through why this holds
+since it’s essentially a composition of three steps that each honest
+<span class="math inline">\(v_i\)</span> performs independently. First
+<span class="math inline">\(v_i\)</span> compiles <span
+class="math inline">\(C\)</span> and checks <span
+class="math inline">\(H(\text{compile}(C)) = M\)</span>, so by collision
+resistance and deterministic compilation we know <span
+class="math inline">\(C\)</span> is the actual source behind the
+production binary. Then <span class="math inline">\(v_i\)</span> derives
+<span class="math inline">\(CR\)</span> from <span
+class="math inline">\(C\)</span> via a deterministic
+semantics-preserving transformation so that the DAG faithfully
+represents <span class="math inline">\(C\)</span>’s behavior for bounded
+inputs. Then <span class="math inline">\(v_i\)</span> runs a sound
+verification tool on <span class="math inline">\(CR\)</span>, i.e if the
+tool reports PASS the property actually holds on <span
+class="math inline">\(CR\)</span><a href="#fn7" class="footnote-ref"
+id="fnref7" role="doc-noteref"><sup>7</sup></a>. The composition chains:
+<span class="math inline">\(C\)</span> maps to <span
+class="math inline">\(M\)</span>, <span class="math inline">\(C\)</span>
+maps to <span class="math inline">\(CR\)</span>, <span
+class="math inline">\(P\)</span> holds on <span
+class="math inline">\(CR\)</span>, and since <span
+class="math inline">\(CR\)</span> faithfully captures <span
+class="math inline">\(C\)</span>’s bounded behavior and <span
+class="math inline">\(C\)</span> compiles to the binary with measurement
+<span class="math inline">\(M\)</span> we get that <span
+class="math inline">\(P\)</span> holds on production code.</p>
+<p>A malicious developer can’t subvert this; submitting <span
+class="math inline">\(C&#39; \neq C\)</span> fails the measurement
+check, compromising fewer than <span class="math inline">\(k\)</span>
+TEEs still leaves at least one honest <span
+class="math inline">\(v_i\)</span> running the correct pipeline, and the
+verification tools are part of the open-source verifier image so they
+can’t be tampered with inside an uncompromised enclave.</p>
+<blockquote>
+<p>NB: soundness holds only for inputs up to <span
+class="math inline">\(B_{max}\)</span>. For inputs exceeding the bounds
+(e.g an order book deeper than 10K orders) the properties are simply not
+verified, which is inherent to bounded verification. The developer must
+set <span class="math inline">\(B_{max}\)</span> to cover realistic
+operating conditions.</p>
+</blockquote>
+<h3 id="completeness-binding-and-confidentiality">Completeness, Binding,
+and Confidentiality</h3>
+<p>The protocol is not complete in the formal sense; there will be
+correct programs that the verification tools can’t prove correct due to
+timeouts, inconclusives, or imprecise abstractions. But this is a
+fundamental tradeoff of formal verification i.e you can’t have a tool
+that is both sound (e.g no false positives) and complete (e.g no false
+negatives) for arbitrary programs, so every practical verification tool
+picks sound-but-incomplete.</p>
+<p>The guarantee is one-sided: if the tool says PASS the property
+definitely holds, but if the tool fails to prove it that doesn’t mean
+the program is broken, it might just mean the tool ran out of time or
+lost precision through abstraction. The tool will never give you a false
+PASS but it might give you a false FAIL i.e it’s conservative by
+design<a href="#fn8" class="footnote-ref" id="fnref8"
+role="doc-noteref"><sup>8</sup></a>.</p>
+<p>Going back to binding, the attestation is bound to <span
+class="math inline">\(M\)</span> by inclusion in the signed message so
+if the developer deploys code with a different <span
+class="math inline">\(M&#39; \neq M\)</span> the attestation simply
+doesn’t apply. Users verify both sides, the production TEE attestation
+shows <span class="math inline">\(M\)</span> and the ceremony
+attestation covers the same <span class="math inline">\(M\)</span>.</p>
+<p>Confidentiality is also guaranteed as it relies on the source code
+<span class="math inline">\(C\)</span> being transmitted over an
+encrypted channel to each <span class="math inline">\(v_i\)</span> and
+existing only inside the enclave. Under the TEE confidentiality
+assumption no party outside can extract <span
+class="math inline">\(C\)</span>, and after the ceremony everything is
+erased. The signed output contains only <span
+class="math inline">\(M\)</span>, the property list, and the bounds, i.e
+no code or intermediate representations are leakd.</p>
+<p>That said a hardware-level compromise of a single <span
+class="math inline">\(v_i\)</span> could still extract <span
+class="math inline">\(C\)</span>; I partially mitigate this by
+distributing code only to TEEs that show proof of cloud, i.e prove
+they’re running on secure datacenters. For scenarios where even this
+residual risk is unacceptable there’s the MPC research direction even
+tho it feels unfeasible <a href="#fn9" class="footnote-ref" id="fnref9"
+role="doc-noteref"><sup>9</sup></a>.</p>
+<h1 id="some-practical-examples">Some Practical Examples</h1>
+<p>Below are some practical examples of how this model can be used to
+verify complex properties:</p>
+<h2 id="information-flow">Information Flow</h2>
+<p>“Private user data never reaches unauthorized outputs.”</p>
+<p>Information flow is actually the most nuanced property class I want
+to verify here. The naive approach would be <strong>taint
+analysis</strong>: tag private inputs (user balances, order details),
+tag public outputs (broadcasts, logs, unauthenticated responses), verify
+no tainted data reaches a public output without passing through an
+approved sanitizer. This is well-studied and efficient but it has a
+fundamental problem; taint analysis tracks data dependencies through
+known struct fields, so a malicious developer who controls the code can
+encode private data in ways the tracker doesn’t follow, e.g balance bits
+into response padding, timestamp low bits, or nonce selection. Taint
+analysis is proactive in properties that the developer wants to check
+but its utility is not bidirectional; it checks whether any dependency
+exist along paths the analyzer tracks. When the developer is
+adversarial, this is obviously not a viable option.</p>
+<p>The right property for most systems is non-interference, i.e making
+sure that no undeclared output changes with changes to private inputs
+(ofc under the BMC). Formally:</p>
+<p><span class="math display">\[\forall u \in \text{Users}, \forall I_1,
+I_2 \in \text{Inputs}(B_{\max})\]</span>,</p>
+<p>if <span class="math inline">\(I_1 \equiv_{-u} I_2\)</span> then</p>
+<p><span
+class="math display">\[\text{output_public}(\text{Program}(I_1)) =
+\text{output_public}(\text{Program}(I_2))\]</span>,</p>
+<p>where <span class="math inline">\(I_1 \equiv_{-u} I_2\)</span> means
+the inputs are identical except for user <span
+class="math inline">\(u\)</span>’s private data and <span
+class="math inline">\(\text{output\_public}\)</span> is the projection
+of all program outputs onto non-authenticated channels. This
+formalization doesn’t care about code structure, function names, or
+field labels; it compares raw output bytes. If any byte changes as a
+function of private data, there is a violation.</p>
+<p>To see why this is better than taint analysis, consider a developer
+who embeds a hidden endpoint so that if the hash of the request payload
+equals some backdoor constant the program returns an encoding of all
+inventories. Taint analysis might not flag that encoded output if the
+output field isn’t labeled as a “balance output” (the developer controls
+field names). Non-interference catches it: you run the program twice
+with different balances, send the backdoor request in both runs, observe
+that the output bytes differ. Even steganographic tricks, balance bits
+XOR’d into padding, encoded into message ordering, hidden in error
+message selection, all get caught because the raw bytes change as a
+function of balance so non-interference fails.</p>
+<p>We can verify this by leveraging self-composition: essentially I
+construct a product program that runs the original twice, once with
+<span class="math inline">\(\text{private}_{u,1}\)</span> and once with
+<span class="math inline">\(\text{private}_{u,2}\)</span>, sharing all
+other inputs <span class="math inline">\(I_{\text{shared}}\)</span>,
+then asserts that the public projections of both outputs are equal. I
+run BMC on this product program searching for any assignment within
+<span class="math inline">\(B_{\max}\)</span> that violates the
+assertion. If no counterexample exists within bounds, non-interference
+holds. Cost is approximately <span
+class="math inline">\(2\times\)</span> single-program BMC since the
+state space doubles.</p>
+<blockquote>
+<p>NB: a stateful backdoor (e.g a counter that only leaks on the third
+invocation) might seem like it requires <span
+class="math inline">\(K\)</span>-step unrolling to catch, but it
+doesn’t. The program’s state <span class="math inline">\(S\)</span>
+(including the counter) is an input to each invocation, and BMC explores
+all possible values of <span class="math inline">\(S\)</span> within
+<span class="math inline">\(B_{\max}\)</span>. So it will find the state
+where counter = 2, pair it with the backdoor payload, and discover that
+the public output changes when private data changes. No need to actually
+replay <span class="math inline">\(K\)</span> events to reach that
+state.</p>
+</blockquote>
+<p>The critical piece that makes this work is the complete I/O surface
+argument. The definition of <span
+class="math inline">\(\text{output\_public}\)</span> must capture every
+byte that exits the process, not just “known” output channels. In a VM
+execution where each byte leaving the VM’s boundaries goes through a
+syscall (<span class="math inline">\(\text{write}\)</span>, <span
+class="math inline">\(\text{sendto}\)</span>, <span
+class="math inline">\(\text{sendmsg}\)</span>, etc.), the verifier can
+enumerate all I/O syscall nodes in the DAG and includes all of them in
+<span class="math inline">\(\text{output\_public}\)</span> so that a
+developer cannot create a hidden output channel that escapes the
+check.</p>
+<p>For instance, adversarial attacker tries to place a hidden TCP
+listener on a secret port? Its <span
+class="math inline">\(\text{write}()\)</span> calls are syscall nodes in
+the DAG, which is complete as it contains every instruction that can
+execute and every I/O operation that can occur. For explicit data
+channels, there is nowhere to hide. Covert channels (timing, cache side
+channels, power patterns) are not covered by this base-level argument;
+those require timing-sensitive non-interference described in the
+subsection below (On timing interference &amp; other side channels).</p>
+<p>Of course, strict non-interference is not practical for any system
+that must make private-data-dependent decisions. For example, a margin
+check necessarily leaks whether <span
+class="math inline">\(\text{balance} \geq
+\text{required\_margin}\)</span>. We must in fact relax the property
+with explicit approved declassification points: non-interference holds
+except at declared points like <span
+class="math inline">\(\text{margin\_check}(u, \text{order}) \to
+\text{bool}\)</span> and <span
+class="math inline">\(\text{solvency\_check}(u) \to
+\text{bool}\)</span>. The ceremony verifier enforces that only the
+declared declassification points exist; if the developer introduces an
+undeclared one the self-composition check finds it because output bytes
+change outside the approved points.</p>
+<h4 id="on-timing-interference-other-side-channels">On timing
+interference &amp; other side channels</h4>
+<p>This last, mostly theoretical section, extends the output model to
+include execution time so that <span
+class="math inline">\(\text{output\_public} = (\text{all output bytes},
+\text{execution\_steps})\)</span>. This catches timing side channels,
+e.g processing takes longer when a user has more positions. Most real
+systems fail this property tho because it requires constant-time
+programming: fixed-iteration loops, no data-dependent branching on
+private values. It’s the strongest information flow guarantee but the
+hardest to achieve in practice. Verification uses the same
+self-composition approach but the assertion includes step counts; may
+actually be practical for small critical sections (critical is in
+relation to confidentiality not integrity here), often infeasible for
+entire programs<a href="#fn10" class="footnote-ref" id="fnref10"
+role="doc-noteref"><sup>10</sup></a>.</p>
+<h2 id="fairness">Fairness</h2>
+<p>“No two users with the same inputs get different treatment.”</p>
+<p>Fairness verification checks that the program’s output is invariant
+under permutation of user identities at the same priority level.
+Formally: given two users with identical inputs (same balances, same
+orders, same priority), the program must produce identical outputs
+regardless of which pubkey they have. If swapping pubkey <span
+class="math inline">\(A\)</span> and pubkey <span
+class="math inline">\(B\)</span> while keeping everything else the same
+produces different results, there’s a fairness violation.</p>
+<p>The immediate question is how this works when the identity space is
+effectively unbounded, e.g user pubkeys are <span
+class="math inline">\(2^{256}\)</span> for secp256k1. BMC doesn’t
+enumerate inputs; it encodes the DAG as a set of constraints (a SAT/SMT
+formula) and asks the solver to find any assignment that violates the
+property. The solver works backwards from the constraint, so if there’s
+a branch on <code>pubkey == X</code> where <code>X</code> is some
+hardcoded privileged constant, the solver immediately produces a
+satisfying assignment where one user’s pubkey equals <code>X</code> and
+the other doesn’t. It finds the path algebraically (i.e not by brute
+force).</p>
+<p>The same principle applies for runtime configuration and values as
+well; if the privileged pubkey comes from an env var rather than a
+hardcoded constant the solver has two unknowns (pubkey and env_var),
+sets them equal, and finds the violation. At compile time neither value
+is known but the solver doesn’t need concrete values, it just needs to
+find that there exists some assignment where two users with identical
+inputs get different outputs.</p>
+<p>An interesting case is obfuscated privilege checks, e.g
+<code>if H(\text{pubkey}) == C</code> where <code>H</code> is a hash
+function with high complexity to be reversed. This may seem like a blind
+spot since solver can’t really reach the privileged branch, but
+theoretically this is handled by treating <code>H</code> as an
+uninterpreted function: the solver doesn’t reason about what
+<code>H</code> computes, just that it’s deterministic.</p>
+<p>The constraint now becomes “does a pubkey where <span
+class="math inline">\(F(\text{pubkey}) = C\)</span> exist?” and which
+the solver can abstractly solve with pubkey = <span
+class="math inline">\(z\)</span> where <span class="math inline">\(F(z)
+= C\)</span> without computing any preimage. This extends to arbitrary
+compositions as well; if the check is
+<code>H(\text{pubkey}) \% 2 == 0</code> the entire expression can be
+abstracted as a single uninterpreted function <span
+class="math inline">\(G(\text{pubkey})\)</span> and the solver reasons
+about it the same way. Any deterministic computation over inputs can be
+abstracted this way since the congruence axiom holds for all
+deterministic functions.</p>
+<blockquote>
+<p>NB: the theoretical argument for uninterpreted function abstraction
+feels correct; such actions are deterministic so the solver can reason
+about reaching the state in an abstract manner without inverting hash
+functions or solving hard problems. That said I haven’t validated this
+against real BMC tooling or practical approaches.</p>
+</blockquote>
+<h1 id="collective-speccing">Collective Speccing</h1>
+<p>The biggest limitation of this whole protocol is that the guarantee
+is only as good as the specification, and a developer who controls <span
+class="math inline">\(S\)</span> can deliberately omit properties that
+would expose exploitable behavior, i.e leave a gap between what the code
+actually does and what <span class="math inline">\(S\)</span> declares.
+Non-interference partially mitigates this for information flow since
+it’s a default-deny model that catches undeclared channels regardless of
+whether <span class="math inline">\(S\)</span> mentions them, but for
+other property classes like functional correctness, conservation,
+temporal safety, an omission in <span class="math inline">\(S\)</span>
+is essentially invisible to the verification pipeline. I think this is
+actually the most interesting problem in the whole design.</p>
+<p>Collective speccing is an adversarial mechanism that turns
+specification completeness into a public bounty game; instead of
+trusting <span class="math inline">\(D\)</span> to provide a complete
+<span class="math inline">\(S\)</span>, external participants can
+propose properties that <span class="math inline">\(S\)</span> should
+include but doesn’t, and get paid for finding genuine gaps. I’ll walk
+through how this works and why it’s slightly harder to game than it
+looks.</p>
+<p>A researcher who believes <span class="math inline">\(S\)</span> is
+missing a property <span class="math inline">\(P_{\text{new}}\)</span>
+submits it along with a collateral stake <span
+class="math inline">\(c\)</span>; the stake prevents spam since if <span
+class="math inline">\(P_{\text{new}}\)</span> is trivial, already
+covered by an existing property, or nonsensical, the researcher loses
+<span class="math inline">\(c\)</span>. The submission is encrypted to
+the verification TEEs so that the property itself remains confidential
+during the review window. The developer team then has a bounded review
+period <span class="math inline">\(t\)</span> to respond, and there are
+essentially three outcomes. If <span class="math inline">\(D\)</span>
+acknowledges the gap then <span
+class="math inline">\(P_{\text{new}}\)</span> gets added to <span
+class="math inline">\(S\)</span>, the researcher receives a bounty <span
+class="math inline">\(b\)</span> plus their stake <span
+class="math inline">\(c\)</span> back, and the ceremony must be re-run
+with the updated <span class="math inline">\(S\)</span>. Alternatively
+<span class="math inline">\(D\)</span> argues that <span
+class="math inline">\(P_{\text{new}}\)</span> is already covered by
+existing properties or is outside the system’s scope; the justification
+is recorded on-chain and the researcher can dispute, in which case the
+verification TEEs can actually run the property against the code to
+determine if it’s genuinely redundant. But the interesting one is the
+third outcome, and I think it’s the critical forcing function of the
+whole mechanism; if <span class="math inline">\(D\)</span> does not
+respond within <span class="math inline">\(t\)</span> then <span
+class="math inline">\(P_{\text{new}}\)</span> becomes public
+automatically. Silence is treated as an admission that the property is
+valid but inconvenient, and once public any user can see what <span
+class="math inline">\(S\)</span> was missing and make their own trust
+decision. <span class="math inline">\(D\)</span> can request a bounded
+extension by posting their own stake <span
+class="math inline">\(c_D\)</span>, which buys additional review time
+but signals to observers that <span class="math inline">\(D\)</span> is
+indeed evaluating the submission i.e not ignoring it.</p>
+<p>Now obviously a developer might just reject the property and quietly
+patch the code to satisfy it, re-run the ceremony with a new <span
+class="math inline">\(M\)</span>, and claim the property was always
+satisfied. This is the most predictable bad faith play here. Turns out
+tho it’s defeated by the public record; every submission, whether
+accepted, rejected, or ignored, is persisted with a timestamp. If <span
+class="math inline">\(D\)</span> rejects <span
+class="math inline">\(P_{\text{new}}\)</span> at time <span
+class="math inline">\(t_1\)</span> and then deploys a new <span
+class="math inline">\(M&#39;\)</span> at time <span
+class="math inline">\(t_2 &gt; t_1\)</span> where the updated code now
+satisfies <span class="math inline">\(P_{\text{new}}\)</span>, the
+timeline is publicly visible and the researcher’s original submission
+proves they identified the gap before <span
+class="math inline">\(D\)</span> fixed it. A reputation system or
+arbitration mechanism can then enforce the bounty retroactively, or at
+minimum the developer’s bad faith is permanently on record for users
+evaluating trust. <span class="math inline">\(D\)</span> can also
+preemptively submit internal findings as timestamped notes, i.e if a
+researcher later submits a property that <span
+class="math inline">\(D\)</span> already documented internally, <span
+class="math inline">\(D\)</span> reveals the note to prove prior
+knowledge and avoid duplicate payouts. These notes are committed as
+hashes and only revealed when needed so they don’t leak information
+about known gaps before they’re fixed.</p>
+<p>When a disputed property is run against the code and verification
+fails, i.e the code genuinely violates <span
+class="math inline">\(P_{\text{new}}\)</span>, the result is a confirmed
+vulnerability in live production code. The protocol must handle this as
+responsible disclosure: the failure result is held confidential for a
+remediation period <span class="math inline">\(t_{\text{fix}}\)</span>
+during which <span class="math inline">\(D\)</span> can patch and re-run
+the ceremony. Only after <span
+class="math inline">\(t_{\text{fix}}\)</span> expires without a fix does
+the failure become public. The researcher receives their bounty
+immediately upon confirmed failure regardless of whether <span
+class="math inline">\(D\)</span> patches in time.</p>
+<p>There’s actually a secondary argument for collective speccing beyond
+completeness that I think is a bit underappreciated. Source code
+analysis with LLMs, the threat I motivated this whole document with,
+operates on a massive attack surface; every function, every branch,
+every interaction in the codebase is a potential target.
+Specification-level analysis operates on a dramatically smaller surface.
+A researcher looking at <span class="math inline">\(S\)</span> can only
+reason about what properties are missing from a formal specification,
+not about buffer overflows or race conditions in implementation details
+they can’t see. The attack surface dramatically reduces from “all
+possible bugs in the code” to “all possible omissions in the spec.”</p>
+<blockquote>
+<p>NB: this collapse is significant because it makes the problem
+tractable for both sides; defenders can actually enumerate what the spec
+covers, and attackers are constrained to a formal language rather than
+arbitrary code exploration.</p>
+</blockquote>
+<section id="footnotes" class="footnotes footnotes-end-of-document"
+role="doc-endnotes">
+<hr />
+<ol>
+<li id="fn1"><p>We’d use MPC to do secret-shares of the source across
+the <span class="math inline">\(N\)</span> TEEs so that no single <span
+class="math inline">\(v_i\)</span> sees the full code. The real
+limitation here is actually the MPC overhead over a circuit as complex
+as compilation, and if we want to go with an intermetiate representation
+then the difficulting becomes, besides still having too much overhead
+for the actual property verification, the fact that we’d have to find a
+good way to bind the IR with the produciton measurement.<a
+href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>In <a href="#collective-speccing">collective
+speccing</a> any user may engage in responsible disclosure breaking the
+specification with a certain property that should be enforced<a
+href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>Generalized Attestation framework from my research.<a
+href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>Generalized Attestation framework from my research.<a
+href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>RISC Zero unrolls RISC-V execution traces into an
+arithmetic circuit for proof generation; I do it statically over all
+possible inputs within bounds rather than for a single trace.<a
+href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>Depending on the quorum topology, a single TEE
+revocation may or may not require a full re-run; if <span
+class="math inline">\(k\)</span> valid attestations still remain the
+guarantee could still hold, but this depends on the trust assumptions
+<span class="math inline">\(D\)</span> configured and it’s not directly
+related to the core of this document.<a href="#fnref6"
+class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>These verification techniques (BMC, SMT solving, taint
+analysis) are sound in principle for bounded programs; correctness of
+the tool implementations is an additional trust assumption.<a
+href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>In practice most system code falls within the tractable
+fragment, but some cases like e.g deeply recursive structures with
+unbounded branching will hit timeouts.<a href="#fnref8"
+class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn9"><p>We’d use MPC to do secret-shares of the source across
+the <span class="math inline">\(N\)</span> TEEs so that no single <span
+class="math inline">\(v_i\)</span> sees the full code. The real
+limitation here is actually the MPC overhead over a circuit as complex
+as compilation, and if we want to go with an intermetiate representation
+then the difficulting becomes, besides still having too much overhead
+for the actual property verification, the fact that we’d have to find a
+good way to bind the IR with the produciton measurement.<a
+href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn10"><p>In practice I expect non-interference with approved
+declassification to be the target for any serious financial system.
+Timing-sensitive non-interference is worth pursuing for isolated
+critical sections (e.g the margin check path) but requiring it
+system-wide would make development significantly harder for marginal
+security gain.<a href="#fnref10" class="footnote-back"
+role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section>

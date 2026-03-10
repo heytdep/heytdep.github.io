@@ -1,0 +1,34 @@
+<h1 id="introduction">Introduction</h1>
+<p>This small article shows how to fix errors when building to WASM
+functions that are allocating, without using Rust’s standard
+library.</p>
+<h1 id="the-error-solution">The Error &amp; Solution</h1>
+<p>When we need an allocator but aren’t using the standard library
+compiling to WASM, the following 2 errors arise:</p>
+<div class="sourceCode" id="cb1" data-breaklines=""
+data-language="Rust"><pre class="sourceCode Rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>error<span class="op">:</span> no global memory allocator found but one is required<span class="op">;</span> link to std or add `<span class="at">#[</span>global_allocator<span class="at">]</span>` to a <span class="kw">static</span> item that implements the <span class="bu">GlobalAlloc</span> <span class="kw">trait</span><span class="op">.</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>error<span class="op">:</span> `<span class="at">#[</span>alloc_error_handler<span class="at">]</span>` function required<span class="op">,</span> but not found<span class="op">.</span></span></code></pre></div>
+<p>Rather than finding a workaround for our allocations, we can easily
+use the <code>wee allocator</code> after adding it to our library’s
+dependencies (<code>wee_alloc = "0.4.5"</code>):</p>
+<pre data-rust=""><code>extern crate wee_alloc;
+  ...
+  use core::instrinsics;
+  ...
+  
+  #[global_allocator]
+  static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+  ...
+  #[alloc_error_handler]
+  pub fn oom(_: ::core::alloc::Layout) -&gt; ! {
+    unsafe {
+      intrinsics::abort();
+    }
+  }</code></pre>
+<p>And that’s it!</p>
+<p> </p>
+<p>I encountered this error while trying to compile to WASM a
+cryptography framework I’m optimizing and working on to make it
+Soroban-compatible (Stellar’s native smart contracts).</p>
+<p>I hope this saves the reader some headache :)</p>

@@ -1,0 +1,89 @@
+<p><code>22/09/2023</code></p>
+<p>For those who do not know it, I’ve been working on a rust crate that
+allows for custom ingestion from a stellar core captive process. The
+crate is <a href="https://github.com/xycloo/rs-ingest">rs-ingest</a>,
+and even though the library is still unsafe, I tried stress testing it
+by catching up (almost, when talking big numbers) the whole Stellar
+Mainnet history, precisely up to ledger <code>47803575</code>.</p>
+<h1 id="tldr">TLDR;</h1>
+<p>The process took 1344779.26723297 seconds, or ~15.5 days running on a
+<code>m5.xlarge</code> AWS ec2 instance running
+<code>ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-20230516</code>
+and with 500gb of storage (most of the storage was not used as we are
+not saving the caught up data, just going thorugh it. But take into
+account you’ll need at least ~30GB of free space for the checkpoint
+buckets catchup processes continuously).</p>
+<p>Note that the ledgers of the first years of the network
+(2015-2018/19) will take much less time to process as more recent
+ledgers are much fuller than old ones.</p>
+<h1 id="setting-up-the-process">Setting up the process</h1>
+<p>rs-ingest was born with the intent of working on Futurenet, but next
+xdr is compatible with the current mainnet xdr and so is the
+futurenet-enabled core.</p>
+<p>I also choose (unwisely) to only fetch from one archive meaning that
+I likely have not processed about 10 checkpoints (~640 ledgers).</p>
+<p>Anyways, the implementation of this test is very simple as it relies
+on rs-ingest:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">ingest::</span><span class="op">{</span>IngestionConfig<span class="op">,</span> CaptiveCore<span class="op">,</span> Range<span class="op">,</span> BoundedRange<span class="op">,</span> SupportedNetwork<span class="op">,</span> BufReaderError<span class="op">};</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">stellar_xdr::next::</span>LedgerCloseMeta<span class="op">;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">std::</span><span class="op">{</span><span class="pp">time::</span><span class="op">{</span>Instant<span class="op">,</span> Duration<span class="op">},</span> <span class="pp">fs::</span>File<span class="op">};</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">use</span> <span class="pp">std::io::</span><span class="op">{</span><span class="bu">Write</span><span class="op">,</span> <span class="dt">Result</span><span class="op">};</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> write_to_checkpoint_file(duration<span class="op">:</span> Duration) <span class="op">-&gt;</span> <span class="dt">Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="op">{</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> checkpoint_path <span class="op">=</span> <span class="st">&quot;checkpoint_duration.txt&quot;</span><span class="op">;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">let</span> <span class="kw">mut</span> file <span class="op">=</span> <span class="pp">File::</span>create(checkpoint_path)<span class="op">?;</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>    <span class="pp">write!</span>(file<span class="op">,</span> <span class="st">&quot;{:?}&quot;</span><span class="op">,</span> duration)<span class="op">?;</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    <span class="cn">Ok</span>(())</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="kw">mod</span> rs_ingest_test <span class="op">{</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">pub</span> <span class="kw">fn</span> multi_thread_read_ledgers_range_and_drop(captive_core<span class="op">:</span> <span class="op">&amp;</span><span class="kw">mut</span> CaptiveCore<span class="op">,</span> start<span class="op">:</span> <span class="dt">u32</span><span class="op">,</span> end<span class="op">:</span> <span class="dt">u32</span>) <span class="op">{</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> range <span class="op">=</span> <span class="pp">Range::</span>Bounded(BoundedRange(start<span class="op">,</span> end))<span class="op">;</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> rx <span class="op">=</span> captive_core<span class="op">.</span>prepare_ledgers_multi_thread(<span class="op">&amp;</span>range)<span class="op">.</span>unwrap()<span class="op">;</span></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>        <span class="kw">let</span> <span class="kw">mut</span> last<span class="op">:</span> <span class="dt">u32</span> <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> ledger <span class="kw">in</span> rx<span class="op">.</span>iter() <span class="op">{</span></span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>            <span class="cf">if</span> <span class="kw">let</span> <span class="cn">Some</span>(meta) <span class="op">=</span> ledger<span class="op">.</span>ledger_close_meta <span class="op">{</span></span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>                <span class="kw">let</span> ledger_seq <span class="op">=</span> <span class="cf">match</span> meta<span class="op">.</span>ledger_close_meta <span class="op">{</span></span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">LedgerCloseMeta::</span>V1(v1) <span class="op">=&gt;</span> v1<span class="op">.</span>ledger_header<span class="op">.</span>header<span class="op">,</span></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">LedgerCloseMeta::</span>V0(v0) <span class="op">=&gt;</span> v0<span class="op">.</span>ledger_header<span class="op">.</span>header<span class="op">,</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>                    <span class="pp">LedgerCloseMeta::</span>V2(v2) <span class="op">=&gt;</span> v2<span class="op">.</span>ledger_header<span class="op">.</span>header<span class="op">,</span></span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a>                <span class="op">};</span></span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>                last <span class="op">=</span> ledger_seq<span class="op">.</span>ledger_seq<span class="op">;</span></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>            <span class="op">}</span></span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> config <span class="op">=</span> IngestionConfig <span class="op">{</span></span>
+<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>    executable_path<span class="op">:</span> <span class="st">&quot;/usr/local/bin/stellar-core&quot;</span><span class="op">.</span>to_string()<span class="op">,</span></span>
+<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a>    context_path<span class="op">:</span> <span class="bu">Default</span><span class="pp">::</span><span class="kw">default</span>()<span class="op">,</span></span>
+<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a>    network<span class="op">:</span> <span class="pp">SupportedNetwork::</span>Pubnet<span class="op">,</span></span>
+<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a>    bounded_buffer_size<span class="op">:</span> <span class="cn">None</span><span class="op">,</span></span>
+<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a>    staggered<span class="op">:</span> <span class="cn">None</span></span>
+<span id="cb1-45"><a href="#cb1-45" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb1-46"><a href="#cb1-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-47"><a href="#cb1-47" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> <span class="kw">mut</span> captive_core <span class="op">=</span> <span class="pp">CaptiveCore::</span>new(config)<span class="op">;</span></span>
+<span id="cb1-48"><a href="#cb1-48" aria-hidden="true" tabindex="-1"></a><span class="pp">rs_ingest_test::</span>multi_thread_read_ledgers_range_and_drop(<span class="op">&amp;</span><span class="kw">mut</span> captive_core<span class="op">,</span> start<span class="op">,</span> end)<span class="op">;</span></span>
+<span id="cb1-49"><a href="#cb1-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-50"><a href="#cb1-50" aria-hidden="true" tabindex="-1"></a><span class="kw">let</span> elapsed_time <span class="op">=</span> start_time<span class="op">.</span>elapsed()<span class="op">;</span></span>
+<span id="cb1-51"><a href="#cb1-51" aria-hidden="true" tabindex="-1"></a>write_to_checkpoint_file(elapsed_time)<span class="op">.</span>unwrap()<span class="op">;</span></span></code></pre></div>
+<blockquote>
+<p>This code assumes you have a compatible <code>stellar-core</code> in
+<code>/usr/local/bin/stellar-core</code>.</p>
+</blockquote>
+<h1 id="improving">Improving</h1>
+<p>Besides some improvements in the library itself, catching up could be
+potentially be sped up and improved in terms of reporting checkpoints by
+interacting with archivers directly from our rust code. I’m starting to
+research on writing such crate, which would allow for more customization
+during catchups and to catchup while running a live captive core process
+on the same instance.</p>
