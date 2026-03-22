@@ -1,0 +1,55 @@
+
+    <!DOCTYPE html>
+    <html class="">
+    <head>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/styles/idea.min.css">
+    <link href="../../index.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
+    <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "e9adb517193447a3a9c4d5064ffa2550"}'></script><!-- End Cloudflare Web Analytics -->
+    <!-- and it's easy to individually load additional languages -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
+    <script>
+    fetch("./index.html").then(resp => resp.text().then(content => {
+        const post = document.createElement("div");
+        post.innerHTML =content;
+        document.getElementById("post").appendChild(post);
+        hljs.highlightAll();
+    }));
+    /*
+    function resizeIframe(obj) {
+        obj.style.height = obj.contentWindow.document.documentElement.scrollHeight + 'px';
+        //obj.contentWindow.document.body.style.color = "white"
+        for (el of obj.contentWindow.document.getElementsByTagName("a")) {
+            el.style.color = "\#337AB7"
+        }
+    }
+    */
+    </script>
+    </head>
+    <body>
+    <div id="post">
+    <h4><a href="/">see all posts</a></h1>
+    <h1 class="title">RustWASM: receive js (nested) arrays as parameters</h1>
+    <!--<iframe src="./index.html" frameborder="0" scrolling="no" width="100%" onload="resizeIframe(this)" />-->
+    </div>
+        <script>
+    function resizeIframe(obj) {
+        obj.style.height = obj.contentWindow.document.documentElement.scrollHeight + 'px';
+        obj.style.color = "\#fff"
+    }
+
+    /*fetch("./index.html").then(resp => resp.text().then(content => {
+    const post = document.createElement("div");
+    post.innerHTML = /<BODY.*?>([\s\S]*)<\/BODY>/.exec(content)[1];
+    document.body.appendChild(post);
+    }));
+    */
+
+    </script>
+    </body>
+    </html>
+    

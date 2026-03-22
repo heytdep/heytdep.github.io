@@ -1,0 +1,297 @@
+<p><code>28 aug 2022</code></p>
+<h1 id="introduction">Introduction</h1>
+<p>Groth16 is widely used in zk-SNARKs due to its efficiency in terms of
+both proving and verifying, and the succinctness of the proof. I’ve been
+experimenting on the verification algorithm in order to implement it on
+a <code>#[no_std]</code> WASM environment. The implementation is not
+complete and I’ve decided to work on a forked version of the
+<code>ark-groth16</code> library, which I am optimizing and adapting to
+compile on Stellar’s native smart contracts platform: Soroban. However,
+I’d like to share here my current progress for both future reference and
+for whoever wanted to complete the work.</p>
+<h1 id="before-verifying">Before verifying</h1>
+<p>Before we verify a proof, we need two things:</p>
+<ol>
+<li><p>the proving (needed for proving) and verification key</p></li>
+<li><p>the proof</p></li>
+</ol>
+<p>We obtain the proving and verification key through a trusted setup, a
+detailed explanation of the setup can be found <a
+href="https://xn--2-umb.com/22/groth16/index.html#trusted-setup">here</a>.
+The proof is generated starting from a witness, or private field (and)
+public statements, or public fields, and the proving key. These steps
+rely on randomly-generated values <span
+class="math inline"><em>τ</em>, <em>α</em>, <em>β</em>, <em>γ</em></span>
+ that must not be exposed for the security of the proving/verfying
+system, since they could allow a potentially malicious attacker to
+compute a valid proof <span class="math inline"><em>π</em></span> with
+an invalid private field. Also, all of the computations rely on using
+three elliptic curve groups and correspondig generators <span
+class="math inline"><em>G</em><sub>1</sub>, <em>G</em><sub>2</sub>, <em>G</em><sub>3</sub></span>
+and a pairing (<a href="https://xn--2-umb.com/22/pairings/index.html"
+class="uri">https://xn--2-umb.com/22/pairings/index.html</a>).</p>
+<p>I’ve already built my verification key and my proof, and I want to
+tell the verifier that I know the two hash images <code>i</code> and
+<code>j</code> for a hash <code>k</code>, all without the three values
+to the verifier.</p>
+<pre><code>  Verification Key:
+  
+  &quot;alpha&quot;: [
+    &quot;0x1373fe23372b4855c4f0d6fdbbd5126df7a9cd4461c856ab4f0c4247465e5408&quot;,
+    &quot;0x22430ada951f2f06c72a12fb8f607655768ec3f403641a112484275583d249ef&quot;
+  ],
+  &quot;beta&quot;: [
+    [
+      &quot;0x05e9470fd1b46f5bff475d55ed075706c71497a630240d2b71885b560925e111&quot;,
+      &quot;0x16ac9c10f9097ad05e34504c9a6471c66ce4f4d3a7f6eaf1540ad09bb9e8b08f&quot;
+    ],
+    [
+      &quot;0x23aaf52b99438f46380b12efd78ab573a5aa99484d2464a538da5bfcc2642f8d&quot;,
+      &quot;0x2451d249a03be22ff043978c64fff1c1ac6cddd05ad749f187487de73e3fe749&quot;
+    ]
+  ],
+  &quot;gamma&quot;: [
+    [
+      &quot;0x20b882fa627e06cc76a663a216c1589bbdee0c0ae9828cfd8fb753bd3805d472&quot;,
+      &quot;0x2b2a9cea8ea5ce73b6719b883e199d55a97f1ea9328a03011ea68ae20be43d17&quot;
+    ],
+    [
+      &quot;0x303cd5e6886860d4196398aca5c3de1f82f5f2e759859c0ddff2241291a54422&quot;,
+      &quot;0x083183395558b36834fa86432530f1116596aaac10b69f0b2a1721f3c0b59030&quot;
+    ]
+  ],
+  &quot;delta&quot;: [
+    [
+      &quot;0x249d82794f83ee45108cfbcf5a43312905142a5fc5b9550854168e62a63e2849&quot;,
+      &quot;0x2e052b450ee870289ef52c9b7e4fcdb0529fdecc675edd397a27907d34928b60&quot;
+    ],
+    [
+      &quot;0x09fccaacd1f52a25b3e49fee4bc9d737cc0006400e93505c317a1cec2f64b346&quot;,
+      &quot;0x2ffd0e0392b89070eb4c62d6375c971606d43abe5dcfc2672e426a6421e5b1b3&quot;
+    ]
+  ],
+  &quot;gamma_abc&quot;: [
+    [
+      &quot;0x1aa7acafe10d3a96ad803bf2baa0e7c239593dab41ab924242a6a6b44035e9ad&quot;,
+      &quot;0x2312c4caac75bbc30aa69f07aa36605959250a59e566cf2b27f82bf97a6d1703&quot;
+    ]
+  ]
+
+  Proof:
+  &quot;a&quot;: [
+      &quot;0x0702f9d104aa1ea7b599b27af9839cc32a74fb5a8a2e2181db9f09829efb35b9&quot;,
+      &quot;0x21d51abc11310dda486c1c9764e6746cd5facd33eb9c9b156f27cb76cbd9d0ce&quot;
+    ],
+    &quot;b&quot;: [
+      [
+        &quot;0x07fc10dc59836597b44bcfb1dcbc307fac86c79cbc64f8013beadc2edd5b02a9&quot;,
+        &quot;0x0a466fd8cc51ede866f0dc5a797ba46759fa5f2c7fb32acb41e6bb46309d1c6c&quot;
+      ],
+      [
+        &quot;0x0b5a03c9e0c6133e9a3ce2fb72bcfa147cb680476aabf8e9748d02233a192a55&quot;,
+        &quot;0x141555fb6598127a15d2be6f0489227a2989701740c23251c89b8a2133251e46&quot;
+      ]
+    ],
+    &quot;c&quot;: [
+      &quot;0x0b31d008bda03121c8d5b4fa9ec4e1f0a8086acd6d3e9aa6ce8e7c5621c4462f&quot;,
+      &quot;0x188340086b171cf34d18dd96c00767531269b8154480daf0d9c96e505c4cbf4b&quot;
+  ]
+  </code></pre>
+<h1 id="verifying">Verifying</h1>
+<p>It’s now time to verify the proof, if you remember, we only need the
+triplet <code>A</code>, <code>B</code>, <code>C</code> (proof) and the
+verification key. We might also have some public inputs, but all of our
+inputs (<code>i</code>, <code>j</code>, <code>k</code>) are private.</p>
+<p>Since we need to store our verification key and proof, we need 4
+structs:</p>
+<pre><code>  struct G1Point(uint256, uint256);
+  struct G2Point([uint256; 2], [uint256; 2]);
+
+  struct VerifyingKey {
+    alpha: G1Point,
+    beta: G2Point,
+    gamma: G2Point,
+    delta: G2Point,
+    gamma_abc: Vec&lt;G1Point&gt;,
+  }
+
+  struct Proof {
+    a: G1Point,
+    b: G2Point,
+    c: G1Point,
+  }</code></pre>
+<p>The above assumes you have a <code>uint256</code> type, which can be
+for example a <code>BigInt</code>;</p>
+<h2 id="preparing">Preparing</h2>
+<p>If you paid attention to my verification key and proof, the two
+<code>VerifyingKey</code> and <code>Proof</code> structs represent my
+input. We can now easily construct our verifying key.</p>
+<pre><code>  impl VerifyingKey {
+    fn new() -&gt; Self {
+      VerifyingKey {
+        alpha: G1Point(
+        uint256(&quot;0x1373fe23372b4855c4f0d6fdbbd5126df7a9cd4461c856ab4f0c4247465e5408&quot;),
+        uint256(&quot;0x22430ada951f2f06c72a12fb8f607655768ec3f403641a112484275583d249ef&quot;),
+        ),
+        beta: G2Point(
+        [
+          uint256(&quot;0x05e9470fd1b46f5bff475d55ed075706c71497a630240d2b71885b560925e111&quot;),
+          uint256(&quot;0x16ac9c10f9097ad05e34504c9a6471c66ce4f4d3a7f6eaf1540ad09bb9e8b08f&quot;),
+        ],
+        [
+          uint256(&quot;0x23aaf52b99438f46380b12efd78ab573a5aa99484d2464a538da5bfcc2642f8d&quot;),
+          uint256(&quot;0x2451d249a03be22ff043978c64fff1c1ac6cddd05ad749f187487de73e3fe749&quot;),
+        ],
+        ),
+        gamma: G2Point(
+        [
+          uint256(&quot;0x20b882fa627e06cc76a663a216c1589bbdee0c0ae9828cfd8fb753bd3805d472&quot;),
+          uint256(&quot;0x2b2a9cea8ea5ce73b6719b883e199d55a97f1ea9328a03011ea68ae20be43d17&quot;),
+        ],
+        [
+          uint256(&quot;0x303cd5e6886860d4196398aca5c3de1f82f5f2e759859c0ddff2241291a54422&quot;),
+          uint256(&quot;0x083183395558b36834fa86432530f1116596aaac10b69f0b2a1721f3c0b59030&quot;),
+        ],
+        ),
+
+        delta: G2Point(
+        [
+          uint256(&quot;0x249d82794f83ee45108cfbcf5a43312905142a5fc5b9550854168e62a63e2849&quot;),
+          uint256(&quot;0x2e052b450ee870289ef52c9b7e4fcdb0529fdecc675edd397a27907d34928b60&quot;),
+        ],
+        [
+          uint256(&quot;0x09fccaacd1f52a25b3e49fee4bc9d737cc0006400e93505c317a1cec2f64b346&quot;),
+          uint256(&quot;0x2ffd0e0392b89070eb4c62d6375c971606d43abe5dcfc2672e426a6421e5b1b3&quot;),
+        ],
+        ),
+        gamma_abc: vec![
+          G1Point(
+          uint256(&quot;0x1aa7acafe10d3a96ad803bf2baa0e7c239593dab41ab924242a6a6b44035e9ad&quot;),
+          uint256(&quot;0x2312c4caac75bbc30aa69f07aa36605959250a59e566cf2b27f82bf97a6d1703&quot;),
+          )
+        ],
+    }
+  }
+  }
+
+  ...
+  
+  let vk = verifying_key();
+  assert_eq!(input.clone().length + 1, vk.gamma_abc.length); // notice how gamma_abc is a vector of one element, and that we have 0 public inputs</code></pre>
+<p><em>Note that in these examples I haven’t used the Rust standard
+library, thus the <code>Vec</code> type gets its elements by index
+through the <code>get(idx)</code> method).</em></p>
+<p>We should then aggregate the public inputs with something like:</p>
+<pre><code>  let mut vk_x = G1Point ( 0, 0 );
+  let snark_scalar_field =
+  uint256(&quot;21888242871839275222246405745257275088548364400416034343698204186575808495617&quot;);
+  
+  for i in 0..input.length {  
+    assert!(input.get(i).unwrap().unwrap() &lt; snark_scalar_field);
+    vk_x = elliptic_curve_addition(
+      vk_x,
+      elliptic_curve_scalar_mul(
+        vk.gamma_abc.get(i + 1).unwrap().unwrap(),
+        input.get(i).unwrap().unwrap(),
+      ),
+    );
+  }</code></pre>
+<p>But since we have 0 public inputs, we can skip that part, and simply
+perform this:</p>
+<pre><code>  vk_x = elliptic_curve_addition(vk_x, vk.gamma_abc.get(0).unwrap().unwrap())</code></pre>
+<p>My implementations of the elliptic operations used are the following
+(I don’t have a strong math background so they could hold incorrect
+assumptions, you should double-check them):</p>
+<pre><code>  fn elliptic_double(pt: G1Point) -&gt; G1Point {
+    let x = pt.0;
+    let y = pt.1;
+
+    let l = 3 * x.exp(2) / (2 * y);
+
+    let newx = l.exp(2) - 2 * x;
+    let newy = -l * newx + l * x - y;
+
+    G1Point(newx, newy)
+  }
+
+  fn elliptic_curve_addition(p1: G1Point, p2: G1Point) -&gt; G1Point {
+    let x1 = p1.0;
+    let y1 = p1.1;
+    let x2 = p2.0;
+    let y2 = p2.1;
+
+    if x2 == x1 &amp;&amp; y2 == y1 {
+      return elliptic_double(p1); // if the two points are the same, simply double them
+    }
+    // case when x2 == x1 =&gt; None
+
+    let l = (y2 - y1) / (x2 - x1);
+
+    let newx = l.exp(2) - x1 - x2;
+    let newy = -l * newx + l * x1 - y1;
+
+    G1Point(newx, newy)
+  }
+
+  fn elliptic_curve_scalar_mul(pt: G1Point, n: u64) -&gt; G1Point {
+    if n == 0 {
+      return 0;
+    } else if n == 1 {
+      return pt;
+    } else if !(n % 2) {
+    return elliptic_curve_scalar_mul(elliptic_double(pt), n / 2);
+  } else {
+    return elliptic_curve_addition(elliptic_curve_scalar_mul(elliptic_double(pt), n / 2), pt);
+  }
+  }</code></pre>
+<h2 id="pairing">Pairing</h2>
+<p>EC pairings are how we actually implement verification. We define a
+pairing function:</p>
+<p><span
+class="math display"><em>e</em> : <em>G</em><sub>1</sub> × <em>G</em><sub>2</sub> → <em>G</em><sub><em>t</em></sub></span></p>
+<p>Which isn’t degenerate and that respects bilinearity:</p>
+<p><span
+class="math display"><em>e</em>(<em>m</em> × <em>P</em>1, <em>n</em> × <em>P</em>2) = <em>e</em>(<em>P</em>1, <em>P</em>2)<sup>(<em>m</em> * <em>n</em>)</sup></span></p>
+<p>We can then verify that:</p>
+<p><span
+class="math display"><em>e</em>(<em>a</em><sub>1</sub>, <em>b</em><sub>1</sub>) × <em>e</em>(<em>a</em><sub>2</sub>, <em>b</em><sub>2</sub>) × <em>e</em>(<em>a</em><sub>3</sub>, <em>b</em><sub>3</sub>)... × <em>e</em>(<em>a</em><sub><em>k</em></sub>, <em>b</em><sub><em>k</em></sub>) = 1</span></p>
+<p>This is how the EIP-197 implementation works.</p>
+<p>We aggregate our inputs into (<span
+class="math inline"><em>L</em></span>), we have to check (starting from
+the <a
+href="https://xn--2-umb.com/22/pairings/index.html">pairing</a>):</p>
+<p><span
+class="math display"><em>e</em>(<em>A</em>, <em>B</em>) = <em>e</em>(<em>α</em> × <em>G</em><sub>1</sub>, <em>β</em>  × <em>G</em><sub>2</sub>) + <em>e</em>(<em>L</em>, <em>γ</em> × <em>G</em><sub>2</sub>) + <em>e</em>(<em>C</em>, <em>δ</em> × <em>G</em><sub>2</sub>)</span></p>
+<p>Where <code>A</code>, <code>B</code>, <code>C</code> are the proof,
+<code>L</code> is the aggregation of the inputs.</p>
+<p>The implementation for the bn128 pairing (by <a
+href="https://vitalik.ca">vitalik</a>) can be found <a
+href="https://github.com/ethereum/py_pairing/blob/master/py_ecc/bn128/bn128_pairing.py#L68">here</a>.</p>
+<p> </p>
+<p>The equation becomes:</p>
+<p><span
+class="math display">(<em>P</em><sub><em>a</em></sub> × <em>P</em><sub><em>b</em></sub>) × (<em>L</em><sub><em>i</em></sub> × (−<em>V</em><em>K</em><sub><em>γ</em></sub>)) × (<em>P</em><sub><em>c</em></sub> × (−<em>V</em><em>K</em><sub><em>δ</em></sub>)) = <em>V</em><em>K</em><sub><em>α</em></sub> × <em>V</em><em>K</em><sub><em>β</em></sub></span></p>
+<p>Where <span
+class="math inline"><em>G</em><sub>1</sub> × <em>G</em><sub>2</sub></span>
+corresponds to <span
+class="math inline"><em>e</em>(<em>G</em><sub>1</sub>, <em>G</em><sub>2</sub>)</span>.
+Note how all pairings involve one point in <span
+class="math inline"><em>G</em><sub>1</sub></span> and one in <span
+class="math inline"><em>G</em><sub>2</sub></span>.</p>
+<p>This only requires three pairings assuming that <span
+class="math inline"><em>V</em><em>K</em><sub><em>α</em></sub> × <em>V</em><em>K</em><sub><em>β</em></sub></span>
+has already been computed when preparing the verifiying key.</p>
+<p>This leaves us with the following code:</p>
+<pre><code>  let inputs = prepare_inputs(&amp;prep_vk, &amp;[image]);
+
+  let mut pa_pb = Bn128::pairing(proof.a, proof.b);
+  let l_nvkg = Bn128::pairing(inputs, prep_vk.gamma_g2_neg);
+  let pc_nvkd = Bn128::pairing(proof.c, prep_vk.delta_g2_neg);
+
+  pa_pb.mul_assign(l_nvkg);
+  pa_pb.mul_assign(pc_nvkd);
+
+  let out = pa_pb.eq(&amp;prep_vk.alpha_g1_beta_g2);</code></pre>
+<p>Where ends up being as long as the proof is valid.</p>
+<p>What we had to do is implementing a pairing function for the Bn128
+curve.</p>

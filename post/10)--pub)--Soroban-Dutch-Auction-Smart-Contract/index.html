@@ -1,0 +1,151 @@
+<p>Dutch auctions are one of the most popular auction types since it
+works well and scales easily given its simplicity. In a Dutch auction,
+the auctioneer initializes the auction with a starting price, which is
+lowered as time passes until a bid is received. The <span
+class="math inline"><em>p</em><em>r</em><em>i</em><em>c</em><em>e</em> = <em>f</em>(<em>Δ</em><em>t</em><em>i</em><em>m</em><em>e</em>)</span>
+function does not have to conform to any specific function group, but in
+this auction contract we resembled a linear function since Soroban
+doesn’t currently have support for fixed point math.</p>
+<h1 class="unnumbered" id="contract-description">Contract
+Description</h1>
+<p>Such auction contract should provide three invocation functions:</p>
+<h3 class="unnumbered" id="initialize">initialize</h3>
+<p>This is the invocation that the auction’s admin will use to set up
+the auction. The admin should specify</p>
+<ul>
+<li><p>the token to be used in the auction (for example USDC)</p></li>
+<li><p>the prize token id, so the prize of the auction</p></li>
+<li><p>the already-mentioned starting price for the auction</p></li>
+<li><p>the minimum price (or reserve price), so that the auction’s prize
+doens’t reach a price of 0 by default</p></li>
+<li><p>a slope, so how fast the price decreases over time. Keep in mind
+that in this contract implementation, it is more an "inverse slope",
+meaning that the price equation won’t look like this <span
+class="math inline"><em>y</em> = −<em>m</em><em>x</em> + <em>k</em></span>,
+but like this <span class="math inline">$y = \frac{x}{-m} + k$</span>
+where <span class="math inline"><em>y</em></span> is the price, <span
+class="math inline"><em>x</em></span> is the time that has passed since
+the initialization of the auction, <span
+class="math inline"><em>k</em></span> is the starting price, and <span
+class="math inline"><em>m</em></span> is our "inverse slope". This means
+that our slope is inversely proportional to the speed to which the price
+decreases.</p></li>
+</ul>
+<pre><code>fn initialize(
+        e: Env,
+        admin: Identifier,
+        token_id: BytesN&lt;32&gt;,
+        item_id: BytesN&lt;32&gt;,
+        starting_price: BigInt,
+        minimum_price: BigInt,
+        slope: BigInt,
+    ) {
+        if has_administrator(&amp;e) {
+            panic!(&quot;admin is already set&quot;);
+        }
+
+        let time = e.ledger().timestamp(); // fetch the current time
+
+        write_administrator(&amp;e, admin);
+        put_token_id(&amp;e, token_id);
+        put_item_id(&amp;e, item_id);
+        put_starting_price(&amp;e, starting_price);
+        put_starting_time(&amp;e, time);
+        put_minimum_price(&amp;e, minimum_price);
+        put_slope(&amp;e, slope);
+    }</code></pre>
+<p>These auction settings are saved in the contract data with the
+<code>env.data().put(KEY, VALUE)</code>. For example, the
+<code>put_starting_time()</code> function does the following:</p>
+<pre><code>  fn put_starting_time(e: &amp;Env, time: u64) {
+    let key = DataKey::Timestamp;
+    e.data().set(key, time);
+}</code></pre>
+<p>This data entry can then be read with the
+<code>env.data().get(KEY)</code>, as we do <a
+href="https://github.com/Xycloo/soroban-dutch-auction-contract/blob/main/src/lib.rs#L77">here</a>.</p>
+<h3 class="unnumbered" id="buy-or-placing-a-bid">buy (or placing a
+bid)</h3>
+<p>Here a bidder buys the prize item at the current computed price. The
+buyer is transferring money (i.e the auction’s token) to the auction’s
+admin, then the contract empties itself by sending all of its prize
+tokens to the buyer</p>
+<pre><code>fn buy(e: Env, from: Identifier) {
+    let price = compute_price(&amp;e);
+    transfer_to_admin(&amp;e, &amp;from, price); // bidder pays the auction&#39;s admin
+    empty_contract(&amp;e, from); // transfer the prize from the contract to the bidder
+}</code></pre>
+<p>where <code>compute_price</code> simply solves the above mentioned
+price equation <span class="math inline">$f(\Delta price) = \frac{x}{-m}
++ k$</span>:</p>
+<pre><code>fn compute_price(e: &amp;Env) -&gt; BigInt {
+    let starting_price = get_starting_price(e);
+    let minimum_price = get_minimum_price(e);
+    let starting_time = get_starting_time(e);
+    let current_time = e.ledger().timestamp();
+    let elapsed_time = current_time - starting_time;
+    let rev_slope = get_slope(e);
+
+    let computed = starting_price - BigInt::from_u64(e, elapsed_time) / rev_slope;
+
+    if computed &lt; minimum_price {
+        minimum_price
+    } else {
+        computed
+    }
+}</code></pre>
+<h3 class="unnumbered" id="get_price">get_price</h3>
+<p>A simple getter that returns the computed price for the current
+timestamp. This one just calls the <code>compute_price</code> fn when
+invoked.</p>
+<h1 class="unnumbered" id="testing-the-contract">Testing the
+Contract</h1>
+<p>The testing workflow is the follwing:</p>
+<ol>
+<li><p>create admin accounts for the two standard tokens we are going to
+use (USDC and TEST token).</p></li>
+<li><p>create accounts for two users, user1 (the admin) and user2 (the
+bidder).</p></li>
+<li><p>set the ledger’s time to a recent timestamp.</p></li>
+<li><p>register and initialize the two token contracts</p></li>
+<li><p>register and initialize the auction contract with:</p></li>
+</ol>
+<ul>
+<li><p>USDC as auction token.</p></li>
+<li><p>TEST token as auction prize.</p></li>
+<li><p>starting price of 5 usdc.</p></li>
+<li><p>minimum price of 1 usdc.</p></li>
+<li><p>slope of 900, so that the auction reaches the minimum price in an
+hour (3600, since <span
+class="math inline">5 − (3600/900) = 1 = <em>m</em><em>i</em><em>n</em><em>i</em><em>m</em><em>u</em><em>m</em><em>p</em><em>r</em><em>i</em><em>c</em><em>e</em></span>).</p></li>
+<li><p>mint TEST tokens to the admin, and then transfer them into the
+contract (this is the prize).</p></li>
+<li><p>mint usdc to the bidder so that they can bid.</p></li>
+<li><p>update ledger time to simulate <span
+class="math inline"><em>Δ</em><em>t</em><em>i</em><em>m</em><em>e</em> = 1800</span>,
+which is the same as saying that half an hour has passed since the
+beginning of the auction.</p></li>
+<li><p>allow the auction contract to transfer <span
+class="math inline"><em>n</em></span> usdc out of the bidder’s account,
+where <span class="math inline"><em>n</em></span> is the computed
+price.</p></li>
+<li><p>bidder makes the bid.</p></li>
+<li><p>finally, make all required assertion to verify that the auction
+worked as excpected.</p></li>
+</ul>
+<pre><code>❯ git clone https://github.com/Xycloo/soroban-dutch-auction-contract/
+❯ cargo test
+    Finished test [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/debug/deps/soroban_dutch_auction_contract-b58f3f171dd11289)
+
+running 1 test
+test test::test ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests soroban-dutch-auction-contract
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+</code></pre>

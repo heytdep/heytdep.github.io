@@ -1,9 +1,48 @@
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str;
+
+use aes_gcm::aead::{Aead, OsRng};
+use aes_gcm::{AeadCore, Aes256Gcm, KeyInit};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
+use pbkdf2::pbkdf2_hmac;
+use sha2::Sha256;
+
+const PBKDF2_ITERATIONS: u32 = 100_000;
+
+fn encrypt_content(content: &str, password: &str) -> (String, String, String) {
+    let mut salt = [0u8; 16];
+    rand::RngCore::fill_bytes(&mut OsRng, &mut salt);
+
+    let mut key_bytes = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, PBKDF2_ITERATIONS, &mut key_bytes);
+
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).unwrap();
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher.encrypt(&nonce, content.as_bytes()).unwrap();
+
+    (B64.encode(salt), B64.encode(nonce), B64.encode(ciphertext))
+}
+
+fn load_lock_config() -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let content = fs::read_to_string("./.lock-config").unwrap_or_default();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((slug, password)) = line.split_once('=') {
+            map.insert(slug.trim().to_string(), password.trim().to_string());
+        }
+    }
+    map
+}
 
 fn extract_numeric_prefix(filename: &str) -> Option<i32> {
     let parts: Vec<&str> = filename.split("--").collect();
@@ -160,7 +199,197 @@ code {{
     file.write_all(parent.as_bytes());
 }
 
-fn to_html_pd(name: String) {
+fn build_locked_handler(out_dir: &str, slug: &str, title: &str, content_html: &str, password: &str) {
+    let (salt_b64, nonce_b64, cipher_b64) = encrypt_content(content_html, password);
+
+    let page = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/styles/idea.min.css">
+<link href="/index.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
+<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{{"token": "e9adb517193447a3a9c4d5064ffa2550"}}'></script><!-- End Cloudflare Web Analytics -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/rust.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
+<script>
+window.MathJax = {{
+    startup: {{
+        typeset: false
+    }}
+}};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+code {{
+    background-color: #e4e4e4;
+    padding: 2px;
+    border-radius: 5px;
+    max-height: 800px;
+}}
+#post {{
+    max-width: 720px;
+    font-family: Georgia, 'Times New Roman', serif;
+}}
+#post p, #post ol, #post li {{
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #333;
+}}
+#post h1, #post h2, #post h3, #post h4 {{
+    font-family: Georgia, 'Times New Roman', serif;
+    font-weight: 700;
+}}
+#post h1 {{ font-size: 1.4rem; }}
+#post h2 {{ font-size: 1.2rem; }}
+#post h3 {{ font-size: 1.05rem; }}
+#post blockquote p {{
+    font-size: 13px;
+}}
+.doc-tag {{
+    font-size: 0.7rem;
+    color: #999;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}}
+.title {{
+    font-size: 1.5rem;
+    font-family: Georgia, 'Times New Roman', serif;
+}}
+#lock-form {{
+    margin-top: 2rem;
+    font-family: Georgia, 'Times New Roman', serif;
+}}
+#lock-form input {{
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 14px;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    width: 260px;
+    outline: none;
+}}
+#lock-form input:focus {{
+    border-color: #999;
+}}
+#lock-form button {{
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 14px;
+    padding: 0.4rem 1rem;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    background: #fff;
+    cursor: pointer;
+    margin-left: 0.4rem;
+}}
+#lock-form button:hover {{
+    border-color: #999;
+}}
+#lock-error {{
+    color: rgb(249, 15, 18);
+    font-size: 0.8rem;
+    margin-top: 0.4rem;
+    display: none;
+}}
+.lock-hint {{
+    font-size: 0.78rem;
+    color: #aaa;
+    margin-top: 0.6rem;
+}}
+</style>
+</head>
+<body>
+<div id="post">
+<h4><a href="/">back</a></h4>
+<p class="doc-tag">locked research</p>
+<h1 class="title">{title}</h1>
+<div id="lock-form">
+    <p style="font-size: 0.85rem; color: #666; margin-bottom: 0.8rem;">this content is password-protected.</p>
+    <input type="password" id="lock-password" placeholder="password" autofocus />
+    <button onclick="decrypt()">unlock</button>
+    <div id="lock-error">wrong password</div>
+
+</div>
+<div id="decrypted-content" style="display:none;"></div>
+</div>
+<script>
+const SALT_B64 = "{salt_b64}";
+const NONCE_B64 = "{nonce_b64}";
+const CIPHER_B64 = "{cipher_b64}";
+const ITERATIONS = {iterations};
+
+function b64decode(s) {{
+    return Uint8Array.from(atob(s), c => c.charCodeAt(0));
+}}
+
+async function decrypt() {{
+    const pw = document.getElementById("lock-password").value;
+    const errEl = document.getElementById("lock-error");
+    errEl.style.display = "none";
+
+    try {{
+        const enc = new TextEncoder();
+        const salt = b64decode(SALT_B64);
+        const nonce = b64decode(NONCE_B64);
+        const ciphertext = b64decode(CIPHER_B64);
+
+        const keyMaterial = await crypto.subtle.importKey(
+            "raw", enc.encode(pw), "PBKDF2", false, ["deriveKey"]
+        );
+        const key = await crypto.subtle.deriveKey(
+            {{ name: "PBKDF2", salt: salt, iterations: ITERATIONS, hash: "SHA-256" }},
+            keyMaterial,
+            {{ name: "AES-GCM", length: 256 }},
+            false,
+            ["decrypt"]
+        );
+        const decrypted = await crypto.subtle.decrypt(
+            {{ name: "AES-GCM", iv: nonce }},
+            key,
+            ciphertext
+        );
+        const html = new TextDecoder().decode(decrypted);
+
+        document.getElementById("lock-form").style.display = "none";
+        const container = document.getElementById("decrypted-content");
+        container.innerHTML = html;
+        container.style.display = "block";
+
+        hljs.highlightAll();
+        if (window.MathJax && MathJax.typesetPromise) {{
+            MathJax.typesetPromise();
+        }}
+    }} catch (e) {{
+        errEl.style.display = "block";
+    }}
+}}
+
+document.addEventListener("keydown", function(e) {{
+    if (e.key === "Enter" && document.activeElement.id === "lock-password") {{
+        decrypt();
+    }}
+}});
+</script>
+</body>
+</html>"#,
+        title = title,
+        salt_b64 = salt_b64,
+        nonce_b64 = nonce_b64,
+        cipher_b64 = cipher_b64,
+        iterations = PBKDF2_ITERATIONS,
+    );
+
+    let path = format!("./{}/{}/index.html", out_dir, slug);
+    let mut file = File::create(&path).unwrap();
+    file.write_all(page.as_bytes());
+}
+
+fn to_html_pd(name: String, lock_config: &HashMap<String, String>) {
     let splitted: &Vec<&str> = &name.split(".").collect();
 
     if splitted.len() != 1 {
@@ -172,7 +401,9 @@ fn to_html_pd(name: String) {
             return;
         }
 
-        let is_research = post_name_split[1] == "research";
+        let post_type = post_name_split[1];
+        let is_research = post_type == "research" || post_type == "locked-research";
+        let is_locked = post_type == "locked-research";
         let title_raw = post_name_split[2];
         let slug = make_slug(title_raw);
         let out_dir = if is_research { "research" } else { "writeup" };
@@ -186,22 +417,41 @@ fn to_html_pd(name: String) {
 
         let input_format = if ext_name == "tex" { "latex" } else { "markdown" };
 
-        let _child = Command::new("pandoc")
-            .arg("-f")
-            .arg(input_format)
-            .arg("-t")
-            .arg("html")
-            .arg("--mathjax")
-            .arg(format!("./drafts/{}", name))
-            .arg("-o")
-            .arg(format!("./{}/{}/content.html", out_dir, &slug))
-            .output()
-            .expect("failed to run pandoc");
+        if is_locked {
+            let output = Command::new("pandoc")
+                .arg("-f")
+                .arg(input_format)
+                .arg("-t")
+                .arg("html")
+                .arg("--mathjax")
+                .arg(format!("./drafts/{}", name))
+                .output()
+                .expect("failed to run pandoc");
 
-        let title = title_raw.replace("-", " ");
-        build_handler(out_dir, &slug, &title, is_research);
-    } else {
-        // year marker, no output needed
+            let content_html = String::from_utf8(output.stdout).expect("pandoc output not utf8");
+            let password = lock_config.get(&slug).unwrap_or_else(|| {
+                panic!("no password in .lock-config for locked post: {}", slug);
+            });
+
+            let title = title_raw.replace("-", " ");
+            build_locked_handler(out_dir, &slug, &title, &content_html, password);
+            println!("[+] Built locked: {}/{}", out_dir, slug);
+        } else {
+            let _child = Command::new("pandoc")
+                .arg("-f")
+                .arg(input_format)
+                .arg("-t")
+                .arg("html")
+                .arg("--mathjax")
+                .arg(format!("./drafts/{}", name))
+                .arg("-o")
+                .arg(format!("./{}/{}/content.html", out_dir, &slug))
+                .output()
+                .expect("failed to run pandoc");
+
+            let title = title_raw.replace("-", " ");
+            build_handler(out_dir, &slug, &title, is_research);
+        }
     }
 }
 
@@ -346,6 +596,12 @@ fn gen_index_content(draft_names: Vec<String>) -> String {
         line-height: 1.4;
     }
 
+    .lock-icon {
+        font-size: 0.65rem;
+        color: #bbb;
+        margin-left: 0.3rem;
+    }
+
     @media (max-width: 600px) {
         body { padding: 1.5rem 1rem; }
     }
@@ -371,14 +627,19 @@ function switchTab(tab) {
         let post_name_split: Vec<&str> = draft.split(")--").collect();
 
         if post_name_split.len() > 1 {
-            let is_research = post_name_split[1] == "research";
+            let post_type = post_name_split[1];
+            let is_research = post_type == "research" || post_type == "locked-research";
+            let is_locked = post_type == "locked-research";
             let title_raw = post_name_split[2];
             let slug = make_slug(title_raw);
             let dis_name = title_raw.replace("-", " ");
 
             if is_research {
-                let content_bytes = fs::read(format!("./drafts/{}.md", draft)).unwrap_or(vec![]);
-                let full_string = String::from_utf8(content_bytes).unwrap_or_default();
+                let ext_candidates = ["md", "tex"];
+                let full_string = ext_candidates.iter().find_map(|ext| {
+                    fs::read_to_string(format!("./drafts/{}.{}", draft, ext)).ok()
+                }).unwrap_or_default();
+
                 let snippet: String = full_string
                     .lines()
                     .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
@@ -388,9 +649,15 @@ function switchTab(tab) {
                     .take(160)
                     .collect();
 
+                let lock_badge = if is_locked {
+                    r#"<span class="lock-icon">&#x1f512;</span>"#
+                } else {
+                    ""
+                };
+
                 research_entries.push(format!(
                     r#"<div class="research-entry">
-<a class="title-link" href="./research/{slug}/">{dis_name}</a>
+<a class="title-link" href="./research/{slug}/">{dis_name}{lock_badge}</a>
 <div class="snippet">{snippet}...</div>
 </div>"#
                 ));
@@ -460,6 +727,7 @@ fn write_index(draft_names: Vec<String>) {
 
 fn main() {
     preemptive_remove();
+    let lock_config = load_lock_config();
     let drafts = get_drafts();
 
     let names: Vec<String> = drafts
@@ -476,7 +744,7 @@ fn main() {
 
     for name in &names {
         println!("{:?}", name);
-        to_html_pd(name.clone());
+        to_html_pd(name.clone(), &lock_config);
 
         let base = name.split(".").next().unwrap_or(name);
         draft_basenames.push(base.to_string());

@@ -1,0 +1,648 @@
+<p><code>12 october 2022</code></p>
+<h1 id="introduction">Introduction</h1>
+<p>In about August 2022 the Stellar Development Foundation released the
+first documented version of the sorban_sdk, a Rust SDK to build and test
+smart contracts compatible with Soroban’s WebAssembly VM. Now that the
+<code>v0.1.0</code> version has been released, I’ve decided to write a
+detailed write-up about creating a vault smart contract with the soroban
+SDK.</p>
+<p>Without further introductory words, let’s get started!</p>
+<h1 id="contract-workflow">Contract Workflow</h1>
+<p>This contract is of a very popular kind in the DeFi world: a protocol
+generates yield, and users can buy shares of the protocol’s vault, and
+burn them to get their money back along with the farmed yield (hopefully
+a positive number).</p>
+<p>Since soroban hasn’t yet launched on chain, we can’t use any
+yield-farming techniques, on the other, hand we will focus on the vault
+itself: how to create a contract that allows users to deposit and
+withdraw shares, all while enforcing composability.</p>
+<p>This article will also make use of basic financial maths, luckily
+this blog post was written in LaTeX, so we can enjoy equations with a
+pleasant interface.</p>
+<h1 id="setup">Setup</h1>
+<p>Assuming you have followed the instructions to <a
+href="https://www.rust-lang.org/tools/install">install Rust</a>, you can
+start by firing up your terminal and creating a new crate with
+cargo:</p>
+<pre><code>cargo new --lib soroban-vault-contract
+cd soroban-vault-contract</code></pre>
+<h2 id="the-cargo.toml">The Cargo.toml</h2>
+<p>You’ll want your <code>cargo.toml</code> file to look like this:</p>
+<pre><code>[package]
+name = &quot;soroban-vault-contract&quot;
+version = &quot;0.0.0&quot;
+edition = &quot;2021&quot;
+publish = false
+
+[lib]
+crate-type = [&quot;cdylib&quot;, &quot;rlib&quot;]
+
+[features]
+testutils = [&quot;soroban-sdk/testutils&quot;, &quot;soroban-auth/testutils&quot;]
+
+[dependencies]
+soroban-sdk = &quot;0.1.0&quot;
+soroban-auth = &quot;0.1.0&quot;
+
+[dev_dependencies]
+soroban-sdk = { version = &quot;0.1.0&quot;, features = [&quot;testutils&quot;] }
+soroban-auth = { version = &quot;0.1.0&quot;, features = [&quot;testutils&quot;] }
+rand = { version = &quot;0.7.3&quot; }
+</code></pre>
+<p>Here you are telling cargo that you’ll be using the soroban sdk and
+its auth helpers, and you are telling the compiler that the compilation
+will produce a dynamic system library ("cdylib") and statistically
+linked executables ("rlib" contents are inserted in the executable)
+(remember we are building a WASM crate).</p>
+<h2 id="project-structure">Project structure</h2>
+<p>Besides the <code>lib.rs</code> file, in order to make the project a
+bit cleaner you’ll have to create the <code>test.rs</code> and
+<code>testutils.rs</code> files:</p>
+<pre><code>  touch test.rs
+  touch testutils.rs</code></pre>
+<p>You’re all set now and can start developing the smart contract!</p>
+<h1 id="developing-the-smart-contract">Developing the Smart
+Contract</h1>
+<p>First of all, we have to declare that we aren’t going to use Rust’s
+standard library, then import the creates we will be using and declare
+our test files:</p>
+<pre><code>#![no_std]
+
+#[cfg(feature = &quot;testutils&quot;)]
+extern crate std;
+
+mod test;
+pub mod testutils;
+
+use soroban_auth::{Identifier, Signature};
+use soroban_sdk::{contractimpl, contracttype, BigInt, BytesN, Env};
+
+mod token {
+    soroban_sdk::contractimport!(file = &quot;./soroban_token_spec.wasm&quot;);
+}
+</code></pre>
+<p>As you might have noticed, we are importing the
+<code>./soroban_token_spec.wasm</code> WebAssembly binary, which is an
+implementation of the standard token contract. You’ll need to copy this
+binary to our <code>soroban-vault-contract</code> directory (you can
+find the binary in the sorban-examples github repo).</p>
+<p>We can now define an enum to use as key for storing data in the
+contract (rememeber the soroban uses a Key-Value store for its
+contracts):</p>
+<pre><code>#[derive(Clone)]
+#[contracttype]
+pub enum DataKey {
+    TokenId,
+    Admin,
+    TotSupply,
+    Balance(Identifier),
+    Nonce(Identifier),
+}</code></pre>
+<p>This means that we will store 5 kinds of data on our contracts:</p>
+<ul>
+<li><p>the <code>TokenId</code> will be the id of the token the admin
+wishes to be used in the vault</p></li>
+<li><p>the as an identifier for the vault admin</p></li>
+<li><p>the <code>TotSupply</code>, intuitively the total supply of vault
+shares</p></li>
+<li><p>the <code>Balance</code> for every <code>Identifier</code>, thus
+the amount of vault shares each user holds</p></li>
+<li><p>the admin’s <code>Nonce</code>, a cryptographic value that we use
+in contracts to avoid some actions to be repeated.</p></li>
+</ul>
+<h2 id="data-helpers">Data Helpers</h2>
+<p>Below I defined some functions to help me when working with contract
+data operations (setting and reading data):</p>
+<pre><code>fn get_contract_id(e: &amp;Env) -&gt; Identifier {
+    Identifier::Contract(e.get_current_contract())
+}
+
+fn put_tot_supply(e: &amp;Env, supply: BigInt) {
+    let key = DataKey::TotSupply;
+    e.data().set(key, supply);
+}
+
+fn get_tot_supply(e: &amp;Env) -&gt; BigInt {
+    let key = DataKey::TotSupply;
+    e.data().get(key).unwrap_or(Ok(BigInt::zero(&amp;e))).unwrap()
+}
+
+fn put_id_balance(e: &amp;Env, id: Identifier, amount: BigInt) {
+    let key = DataKey::Balance(id);
+    e.data().set(key, amount);
+}
+
+fn get_id_balance(e: &amp;Env, id: Identifier) -&gt; BigInt {
+    let key = DataKey::Balance(id);
+    e.data().get(key).unwrap_or(Ok(BigInt::zero(&amp;e))).unwrap()
+}
+
+fn put_token_id(e: &amp;Env, token_id: BytesN&lt;32&gt;) {
+    let key = DataKey::TokenId;
+    e.data().set(key, token_id);
+}
+
+fn get_token_id(e: &amp;Env) -&gt; BytesN&lt;32&gt; {
+    let key = DataKey::TokenId;
+    e.data().get(key).unwrap().unwrap()
+}</code></pre>
+<p>As you can see, what I do here is just summarize actions like getting
+the total supply in a single function so that the development results
+faster and more comfortably.</p>
+<h2 id="token-functions">Token Functions</h2>
+<p>For our contract, we will only need the standard token contract to
+check the vault balance, and to transfer funds out of the vault. I have
+defined two functions that achieve this behavior:</p>
+<pre><code>fn get_token_balance(e: &amp;Env) -&gt; BigInt {
+    let contract_id = get_token_id(e);
+    token::Client::new(e, contract_id).balance(&amp;get_contract_id(e))
+}
+
+// we are going to use this to transfer out of the vault
+fn transfer(e: &amp;Env, to: Identifier, amount: BigInt) {
+    let client = token::Client::new(e, get_token_id(e));
+    client.xfer(
+        &amp;Signature::Invoker,
+        &amp;client.nonce(&amp;Signature::Invoker.identifier(e)),
+        &amp;to,
+        &amp;amount,
+    );
+}
+
+// we are going to use this to transfer funds in the vault
+fn transfer_in_vault(e: &amp;Env, from: Identifier, amount: BigInt) {
+    let client = token::Client::new(e, get_token_id(e));
+    let vault_id = get_contract_id(e);
+
+    client.xfer_from(
+        &amp;Signature::Invoker,
+        &amp;BigInt::zero(&amp;e),
+        &amp;from,
+        &amp;vault_id,
+        &amp;amount,
+    )
+}</code></pre>
+<p>Remember that we are getting the token to transfer and to check the
+balance from thanks to the <code>get_token_id()</code> function we
+defined previously.</p>
+<p>Notice also that the <code>transfer_in_vault()</code> function uses
+the <code>token.xfer_from()</code> method, which allows the contract to
+tranfer funds from another account as long as such account has allowed
+the contract to do so.</p>
+<h2 id="admin-management">Admin management</h2>
+<p>Below are the data functions that take care of managing the admin for
+the vault (which simply has to initiate the contract by setting the
+vault token), these are almost standard in most of soroban examples as
+of now:</p>
+<pre><code>fn has_administrator(e: &amp;Env) -&gt; bool {
+    let key = DataKey::Admin;
+    e.data().has(key)
+}
+
+fn read_administrator(e: &amp;Env) -&gt; Identifier {
+    let key = DataKey::Admin;
+    e.data().get_unchecked(key).unwrap()
+}
+
+fn write_administrator(e: &amp;Env, id: Identifier) {
+    let key = DataKey::Admin;
+    e.data().set(key, id);
+}
+</code></pre>
+<h2 id="nonce-management">Nonce management</h2>
+<p>Below are the data functions that take care of reading and updating
+the nonce once read, these are also standard for most soroban
+examples.</p>
+<pre><code>fn read_nonce(e: &amp;Env, id: &amp;Identifier) -&gt; BigInt {
+    let key = DataKey::Nonce(id.clone());
+    e.data()
+        .get(key)
+        .unwrap_or_else(|| Ok(BigInt::zero(e)))
+        .unwrap()
+}
+
+fn verify_and_consume_nonce(e: &amp;Env, auth: &amp;Signature, expected_nonce: &amp;BigInt) {
+    match auth {
+        Signature::Invoker =&gt; {
+            if BigInt::zero(e) != expected_nonce {
+                panic!(&quot;nonce should be zero for Invoker&quot;)
+            }
+            return;
+        }
+        _ =&gt; {}
+    }
+
+    let id = auth.identifier(e);
+    let key = DataKey::Nonce(id.clone());
+    let nonce = read_nonce(e, &amp;id);
+
+    if nonce != expected_nonce {
+        panic!(&quot;incorrect nonce&quot;)
+    }
+    e.data().set(key, &amp;nonce + 1);
+}</code></pre>
+<h2 id="the-actual-contract-invocation-functions">The Actual Contract
+Invocation functions</h2>
+<p>We can now finally start writing our invocation functions, i.e the
+functions that other contracts will invoke. For better code
+maintainability, we define a trait for our vault contract (the comments
+on top of each function describe what the function does):</p>
+<pre><code>pub trait VaultContractTrait {
+    // Sets the admin and the vault&#39;s token id
+    fn initialize(e: Env, admin: Identifier, token_id: BytesN&lt;32&gt;);
+
+    // Returns the nonce for the admin
+    fn nonce(e: Env) -&gt; BigInt;
+
+    // deposit shares into the vault: mints the vault shares to &quot;from&quot;
+    fn deposit(e: Env, from: Identifier, amount: BigInt);
+
+    // withdraw an ammount of the vault&#39;s token id to &quot;to&quot; by burning shares
+    fn withdraw(e: Env, to: Identifier, shares: BigInt);
+
+    // get vault shares for a user
+    fn get_shares(e: Env, id: Identifier) -&gt; BigInt;
+}</code></pre>
+<p>Then we create a <code>VaultContract</code> struct, and write the
+contract implementation with <code>#[contractimpl]</code>:</p>
+<pre><code>
+pub struct VaultContract;
+
+#[contractimpl]
+impl VaultContractTrait for VaultContract {
+    fn initialize(e: Env, admin: Identifier, token_id: BytesN&lt;32&gt;) {
+        if has_administrator(&amp;e) {
+            panic!(&quot;admin is already set&quot;);
+        }
+
+        write_administrator(&amp;e, admin);
+
+        put_token_id(&amp;e, token_id)
+    }
+
+    fn nonce(e: Env) -&gt; BigInt {
+        read_nonce(&amp;e, &amp;read_administrator(&amp;e))
+    }
+
+    fn deposit(e: Env, from: Identifier, amount: BigInt) {
+        transfer_in_vault(&amp;e, from.clone(), amount.clone());
+
+        let tot_supply = get_tot_supply(&amp;e);
+
+        let shares = if BigInt::zero(&amp;e) == tot_supply {
+            amount
+        } else {
+            (amount.clone() * tot_supply) / (get_token_balance(&amp;e) - amount)
+        };
+
+        mint_shares(&amp;e, from, shares);
+    }
+
+    fn get_shares(e: Env, id: Identifier) -&gt; BigInt {
+        e.data()
+            .get(DataKey::Balance(id))
+            .unwrap_or(Ok(BigInt::zero(&amp;e)))
+            .unwrap()
+    }
+
+    fn withdraw(e: Env, to: Identifier, shares: BigInt) {
+        let tot_supply = get_tot_supply(&amp;e);
+        let amount = (shares.clone() * get_token_balance(&amp;e)) / tot_supply;
+
+        burn_shares(&amp;e, to.clone(), shares);
+        transfer(&amp;e, to, amount);
+    }
+}
+</code></pre>
+<p>That was a big step, so let’s break the contract down into 4
+parts:</p>
+<h3 id="initialization">initialization</h3>
+<p>In the <code>initialize</code> function, we are checking whether the
+vault contract already has an administrator, if not we are adding one
+along with the token to use in the vault (the token id is an array of 32
+bytes).</p>
+<h3 id="deposit-shares-minting">deposit: shares minting</h3>
+<p>The deposit first transfers funds from the user invoking it to the
+vault through the <code>transfer_in_vault</code> function (it assumes
+that the user already has allowed the contract to do so as we will see
+when testing the contract, if not this function will panic). Then it
+calculates the amount of shares to mint, which respects the following
+equation:</p>
+<p><span
+class="math inline">(<em>S</em> + <em>s</em>) ÷ <em>S</em> = (<em>a</em> + <em>B</em>) ÷ <em>B</em></span></p>
+<p>where S is the total supply, s is the amount of shares to mint, a is
+the amount of tokens the user has deposited into the vault, and B is the
+token balance of the vault (without taking into account the tokens
+deposited by the user).</p>
+<p>We can simplify this simple equation like this:</p>
+<p><span
+class="math display"><em>B</em><em>S</em> + <em>B</em><em>s</em> = <em>a</em><em>S</em> + <em>B</em><em>S</em></span>
+ </p>
+<p><span
+class="math display"><em>B</em><em>s</em> = <em>a</em><em>S</em></span>
+ </p>
+<p><span
+class="math display"><em>s</em> = <em>a</em><em>S</em> ÷ <em>B</em></span></p>
+<p>Thus the shares to mint are
+<code>( amount * tot_supply ) / vault token balance - amount // since we need to subtract the amount the user has already deposited in the vault</code>,
+as the contract describes.</p>
+<p>Lastly, we are calling a <code>mint_shares</code> function that we
+can define under our helper functions section:</p>
+<pre><code>fn mint_shares(e: &amp;Env, to: Identifier, shares: BigInt) {
+    let tot_supply = get_tot_supply(e);
+    let id_balance = get_id_balance(e, to.clone());
+
+    put_tot_supply(e, tot_supply + shares.clone());
+    put_id_balance(e, to, id_balance + shares);
+}</code></pre>
+<p>Here we are simply updating the user’s vault share balance and the
+total supply.</p>
+<h3 id="withdraw">withdraw</h3>
+<p>Withdrawing first calculates the amount of tokens to send to the user
+with the following equation:</p>
+<p><span
+class="math display">(<em>S</em> − <em>s</em>) ÷ <em>S</em> = (<em>B</em> − <em>a</em>) ÷ <em>B</em></span></p>
+<p>Which we simplify into:</p>
+<p><span
+class="math display"><em>B</em><em>S</em> − <em>B</em><em>s</em> = <em>B</em><em>S</em> − <em>a</em><em>S</em></span>
+ </p>
+<p><span
+class="math display">−<em>B</em><em>s</em> = −<em>a</em><em>S</em></span>
+ </p>
+<p><span
+class="math display"><em>B</em><em>s</em> = <em>a</em><em>S</em></span>
+ </p>
+<p><span
+class="math display"><em>a</em> = <em>B</em><em>s</em> ÷ <em>S</em></span></p>
+<p>Thus <code>(shares * vault token balance) / tot_supply</code>. Then,
+we are calling a <code>burn_shares</code> function, which we can define
+right below the <code>mint_shares</code> function:</p>
+<pre><code>fn burn_shares(e: &amp;Env, to: Identifier, shares: BigInt) {
+    let tot_supply = get_tot_supply(e);
+    let id_balance = get_id_balance(e, to.clone());
+
+    assert!(shares &lt;= id_balance); // asserting that user is not trying to burn more than he has
+
+    put_tot_supply(e, tot_supply - shares.clone());
+    put_id_balance(e, to, id_balance - shares);
+}
+</code></pre>
+<p>Note that we use an assertion to ensure that the user isn’t
+withdrawing more than he already has.</p>
+<h3 id="getters">getters</h3>
+<p>The nonce and <code>get_balance</code> fns are simple getters that
+simply read data from the contract and extern it to the invocation.</p>
+<h1 id="testing-the-contract">Testing the Contract</h1>
+<p>In this section, we are going to test our contract and simulate the
+situation where:</p>
+<ol>
+<li><p>User 1 is the admin of the vault</p></li>
+<li><p>User 1 buys 5 shares from the vault</p></li>
+<li><p>User 2 buys 8 shares from the vault</p></li>
+<li><p>the vault earns a yield of 100% (simply minting 13 tokens to the
+contract)</p></li>
+<li><p>user 1 withdraws 3 of 5 shares from the vault</p></li>
+</ol>
+<h2 id="testutils.rs">testutils.rs</h2>
+<p>In order to have a better testing experience, we are going to use
+some testutils to ease the process of registering the contract and
+invoking it.</p>
+<p>To interact with the Vault contract, we will have to import the
+<code>VaultContractClient</code> struct, which is added automatically to
+our crate:</p>
+<pre><code>#![cfg(any(test, feature = &quot;testutils&quot;))]
+
+use crate::VaultContractClient;
+use soroban_auth::Identifier;
+
+use soroban_sdk::{BigInt, BytesN, Env};
+
+pub fn register_test_contract(e: &amp;Env, contract_id: &amp;[u8; 32]) {
+    let contract_id = BytesN::from_array(e, contract_id);
+    e.register_contract(&amp;contract_id, crate::VaultContract {});
+}
+</code></pre>
+<p>Here I have also defined a function to register the contract in the
+environment.</p>
+<p>Now we have to define our testutils <code>VaultContract</code>
+struct, write a <code>client()</code> implementation which will return
+the client we imported from the crate root, then write a
+<code>new()</code> implementation which simply builds us the contract
+struct, and finally write all the implementations that invoke the
+contract functions in the <code>VaultContractTrait</code> through the
+<code>VaultContractClient</code>:</p>
+<pre><code>pub struct VaultContract {
+    env: Env,
+    contract_id: BytesN&lt;32&gt;,
+}
+
+impl VaultContract {
+    fn client(&amp;self) -&gt; VaultContractClient {
+        VaultContractClient::new(&amp;self.env, &amp;self.contract_id)
+    }
+
+    pub fn new(env: &amp;Env, contract_id: &amp;[u8; 32]) -&gt; Self {
+        Self {
+            env: env.clone(),
+            contract_id: BytesN::from_array(env, contract_id),
+        }
+    }
+
+    pub fn initialize(&amp;self, admin: &amp;Identifier, token_id: &amp;[u8; 32]) {
+        self.client()
+            .initialize(admin, &amp;BytesN::from_array(&amp;self.env, token_id));
+    }
+
+    pub fn nonce(&amp;self) -&gt; BigInt {
+        self.client().nonce()
+    }
+
+    pub fn deposit(&amp;self, from: Identifier, amount: BigInt) {
+        self.client().deposit(&amp;from, &amp;amount)
+    }
+
+    pub fn withdraw(&amp;self, to: Identifier, shares: BigInt) {
+        self.client().withdraw(&amp;to, &amp;shares)
+    }
+
+    pub fn get_shares(&amp;self, id: &amp;Identifier) -&gt; BigInt {
+        self.client().get_shares(id)
+    }
+}</code></pre>
+<p>Note that all of our Authentication is implicit and doesn’t need
+further checks since:</p>
+<ul>
+<li><p>when depositing, the contract first tries to transfer in the
+vault the funds, if the user won’t allow that the contract will panic
+(thus won’t mint the shares to the user)</p></li>
+<li><p>when withdrawing, we are asserting that the user has enough vault
+shares in its balance, if not the contract will panic and won’t transfer
+any amount to the user.</p></li>
+</ul>
+<p>We are now ready to write the actual test.</p>
+<h2 id="test.rs">test.rs</h2>
+<p>The first thing we want to do in our test.rs file, is importing the
+testutils, the standard token implementation we imported in the lib.rs
+file, and then the sorboan sdk with its auth helpers (along with the
+rand crate to generate random numbers for our contract ids). Then we
+also define three functions:</p>
+<ul>
+<li><p>one to generate random contract ids</p></li>
+<li><p>one to register the token contract of USDC (just a representation
+of it)</p></li>
+<li><p>one to create the vault contract through the testutils’
+<code>VaultContract</code> struct</p></li>
+</ul>
+<pre><code>#![cfg(test)]
+
+use crate::testutils::{register_test_contract as register_vault, VaultContract};
+use crate::token::{self, TokenMetadata};
+use rand::{thread_rng, RngCore};
+use soroban_auth::{Identifier, Signature};
+use soroban_sdk::{testutils::Accounts, AccountId, BigInt, BytesN, Env, IntoVal};
+
+fn generate_contract_id() -&gt; [u8; 32] {
+    let mut id: [u8; 32] = Default::default();
+    thread_rng().fill_bytes(&amp;mut id);
+    id
+}
+
+fn create_token_contract(e: &amp;Env, admin: &amp;AccountId) -&gt; ([u8; 32], token::Client) {
+    let id = e.register_contract_token(None);
+    let token = token::Client::new(e, &amp;id);
+    // decimals, name, symbol don&#39;t matter in tests
+    token.init(
+        &amp;Identifier::Account(admin.clone()),
+        &amp;TokenMetadata {
+            name: &quot;USD coin&quot;.into_val(e),
+            symbol: &quot;USDC&quot;.into_val(e),
+            decimals: 7,
+        },
+    );
+    (id.into(), token)
+}
+
+fn create_vault_contract(
+    e: &amp;Env,
+    admin: &amp;AccountId,
+    token_id: &amp;[u8; 32],
+) -&gt; ([u8; 32], VaultContract) {
+    let id = generate_contract_id();
+    register_vault(&amp;e, &amp;id);
+    let vault = VaultContract::new(e, &amp;id);
+    vault.initialize(&amp;Identifier::Account(admin.clone()), token_id);
+    (id, vault)
+}</code></pre>
+<p>Finally, let’s emulate the situation I’ve described at the beginning
+of this section. The code below is quite intuitive and each action is
+commented, so I won’t paraphrase it. I only would like to shine light on
+how I am invoking the token contract: we are using the
+<code>with_source_account()</code> method and then
+<code>Signature::Invoker</code> as signature. This means that we are
+signing the transaction with the source account we set.</p>
+<pre><code>  
+#[test]
+fn test() {
+    let e: Env = Default::default();
+    let admin1 = e.accounts().generate(); // generating the usdc admin
+
+    let user1 = e.accounts().generate();
+    let user2 = e.accounts().generate();
+    let user1_id = Identifier::Account(user1.clone());
+    let user2_id = Identifier::Account(user2.clone());
+
+    let (contract1, usdc_token) = create_token_contract(&amp;e, &amp;admin1); // registered and initialized the usdc token contract
+    let (contract_vault, vault) = create_vault_contract(&amp;e, &amp;user1, &amp;contract1); // registered and initialized the vault token contract, with usdc as vault token
+
+    let vault_id = Identifier::Contract(BytesN::from_array(&amp;e, &amp;contract_vault)); // the id of the vault
+
+    // minting 1000 usdc to user1
+    usdc_token.with_source_account(&amp;admin1).mint(
+        &amp;Signature::Invoker,
+        &amp;BigInt::zero(&amp;e),
+        &amp;user1_id,
+        &amp;BigInt::from_u32(&amp;e, 1000),
+    );
+
+    // minting 1000 usdc to user2
+    usdc_token.with_source_account(&amp;admin1).mint(
+        &amp;Signature::Invoker,
+        &amp;BigInt::zero(&amp;e),
+        &amp;user2_id,
+        &amp;BigInt::from_u32(&amp;e, 1000),
+    );
+
+    // user 1 allows the vault to spend 5 usdc (which will be deposited in the vault)
+    usdc_token.with_source_account(&amp;user1).approve(
+        &amp;Signature::Invoker,
+        &amp;BigInt::zero(&amp;e),
+        &amp;vault_id,
+        &amp;BigInt::from_u32(&amp;e, 5),
+    );
+
+    // user1 buys shares from the vault
+    vault.deposit(user1_id.clone(), BigInt::from_i32(&amp;e, 5));
+
+    assert_eq!(
+        usdc_token.with_source_account(&amp;admin1).balance(&amp;user1_id),
+        995
+    );
+    assert_eq!(vault.get_shares(&amp;user1_id), 5);
+
+    // user 2 allows the vault to spend 8 usdc (which will be deposited in the vault)
+    usdc_token.with_source_account(&amp;user2).approve(
+        &amp;Signature::Invoker,
+        &amp;BigInt::zero(&amp;e),
+        &amp;vault_id,
+        &amp;BigInt::from_u32(&amp;e, 8),
+    );
+
+    // user2 buys shares from the vault
+    vault.deposit(user2_id, BigInt::from_i32(&amp;e, 8));
+
+    // the vault generates yield
+    usdc_token.with_source_account(&amp;admin1).mint(
+        &amp;Signature::Invoker,
+        &amp;BigInt::zero(&amp;e),
+        &amp;vault_id,
+        &amp;BigInt::from_u32(&amp;e, 13),
+    );
+
+    // user1 withdraws from the vault
+    vault.withdraw(user1_id.clone(), BigInt::from_i32(&amp;e, 3));
+    assert_eq!(
+        usdc_token.with_source_account(&amp;admin1).balance(&amp;user1_id),
+        1001
+    ); // user 1 now has 1001 USDC and still has 2 shares in the vault.
+    assert_eq!(vault.get_shares(&amp;user1_id), 2);
+}
+
+</code></pre>
+<h1 id="wrapping-it-all-up">Wrapping it all up</h1>
+<p>I hope that the reader found this tutorial useful, and in order to
+make the process easier if you encounter errors you shouldn’t be
+encountering I have published the code to a <a
+href="https://github.com/Xycloo/soroban-vault-contract">Github
+repo</a>.</p>
+<p>You can go ahead and try it out:</p>
+<pre><code>&gt; git clone https://github.com/Xycloo/soroban-vault-token-contract
+&gt; cd soroban-vault-contract
+
+&gt; cargo test
+
+     Finished test [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/debug/deps/soroban_vault_contract-9f7cb3a1d823b9eb)
+
+running 1 test
+test test::test ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests soroban-vault-contract
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+  </code></pre>
+<p>The test passed, mission accomplished!</p>

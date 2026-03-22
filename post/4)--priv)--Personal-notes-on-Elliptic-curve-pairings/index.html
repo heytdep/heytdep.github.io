@@ -1,0 +1,133 @@
+<p><code>last updated: 6 Sept 2022</code></p>
+<h1 id="pairing-basics">Pairing basics</h1>
+<p>Pairings’ power lies in the fact that they allow for checking fairly
+complicated equations on elliptic curve points (x, y).</p>
+<p><span
+class="math display"><em>e</em>(<em>P</em>, <em>Q</em>) * <em>e</em>(<em>G</em>, <em>G</em> * 5) = 1 =  = <em>p</em> * <em>q</em> + 5 = 0</span></p>
+<p>Pairings in general aren’t complicate, for example when working with
+integers:</p>
+<p><span
+class="math display"><em>e</em>(<em>x</em>, <em>y</em>) = 2<sup><em>x</em> × <em>y</em></sup></span></p>
+<p>However, such numbers aren’t suitable for ECC since they are very
+simple to analyze, for example, if you have both <span
+class="math inline"><em>x</em></span> and <span
+class="math inline"><em>e</em>(<em>x</em>, <em>y</em>)</span>, you can
+compute <span class="math inline"><em>y</em></span> with a division and
+a logarithm.</p>
+<p>Elliptic curve pairings on the other hand, allow you to treat these
+pairings as black boxes where only certain operations are permitted (+,
+-, /, *).</p>
+<p> </p>
+<p>Prime fields are a set of numbers</p>
+<p><span
+class="math display">0, 1, 2, ..., <em>p</em> − 1<em>w</em><em>h</em><em>e</em><em>r</em><em>e</em> <em>p</em> <em>i</em><em>s</em> <em>a</em> <em>p</em><em>r</em><em>i</em><em>m</em><em>e</em></span></p>
+<p>that are needed in ECC TK</p>
+<p>Operations involving <span class="math inline"><em>p</em></span> are
+as follows:</p>
+<p><span
+class="math display"><em>a</em> + <em>b</em> : (<em>a</em> + <em>b</em>) mod  <em>p</em></span>
+<span
+class="math display"><em>a</em> − <em>b</em> : (<em>a</em> − <em>b</em>) mod  <em>p</em></span>
+<span
+class="math display"><em>a</em> × <em>b</em> : (<em>a</em> × <em>b</em>) mod  <em>p</em></span>
+<span
+class="math display"><em>a</em> ÷ <em>b</em> : (<em>a</em> × <em>b</em><sup><em>p</em> − 2</sup>) mod  <em>p</em></span></p>
+<p>The division is different since we only want to deal with
+integers.</p>
+<p>We also work with extensions of a field, where in our case <span
+class="math inline"><em>i</em><sup>2</sup> + 1 = 0</span> is the
+equations that always needs to be false.</p>
+<p>Elliptic curve pairings are maps</p>
+<p><span
+class="math display"><em>G</em><sub>2</sub> × <em>G</em><sub>1</sub> → <em>G</em><sub><em>t</em></sub></span></p>
+<p>With:</p>
+<ul>
+<li><p><span class="math inline"><em>G</em><sub>1</sub></span> being an
+elliptic curve ( <span
+class="math inline"><em>y</em><sup>2</sup> = <em>x</em><sup>3</sup> + <em>b</em></span>
+), and <code>(x, y)</code> are memebrs of a field <span
+class="math inline"><em>F</em><sub><em>p</em></sub></span>.</p></li>
+<li><p><span class="math inline"><em>G</em><sub>2</sub></span> being an
+elliptic curve, where <code>(x, y)</code> are members of a field <span
+class="math inline"><em>F</em><sub><em>p</em></sub><sup>12</sup></span>.
+We also defined a <span class="math inline"><em>w</em></span> defined by
+a 12th degree polynomial.</p></li>
+<li><p><span class="math inline"><em>G</em><sub><em>t</em></sub></span>
+is the result which is also F_p^<span>12</span></p></li>
+</ul>
+<p> </p>
+<h1 id="computing-pairings-with-millers-algorithm">Computing pairings
+with Miller’s Algorithm</h1>
+<p>The most optimized way of computing a bilinear and non-degenerate
+elliptic curve pairing <span
+class="math inline"><em>e</em>(<em>P</em>, <em>Q</em>)</span> where P
+and Q are two points on an elliptic curve and the result is a scalar, is
+by first using miller’s recursive algorithm to compute a function <span
+class="math inline"><em>f</em><sub><em>λ</em>, <em>Q</em></sub>(<em>P</em>)</span>
+and then raising it to the large power <span
+class="math inline">(<em>q</em><sup>12</sup> − 1)/<em>r</em></span>.</p>
+<p>With <span class="math inline"><em>q</em></span> as the prime order
+of the coordinate field of BLS12 <span
+class="math inline"><em>F</em><sub><em>q</em></sub></span>, and <span
+class="math inline"><em>r</em></span> as the order of the groupt of
+points on the curve, and two points <span
+class="math inline"><em>Q</em>, <em>P</em></span>, we want to compute
+<span
+class="math inline"><em>f</em><sub><em>λ</em></sub>, <em>Q</em>(<em>P</em>)</span>
+of <span
+class="math inline"><em>F</em><sub><em>q</em></sub><sup>12</sup></span>
+which is simply an evaluation of a certain function <span
+class="math inline"><em>f</em><sub><em>λ</em></sub>, <em>Q</em></span>
+at point <span class="math inline"><em>P</em></span> with <span
+class="math inline"><em>λ</em></span> being the remainder of <span
+class="math inline"><em>q</em> ÷ <em>r</em></span>.</p>
+<p>We compute such rational function with Miller’s loop which
+recursively builds rational functions of the type <span
+class="math inline"><em>f</em><sub><em>i</em></sub>, <em>Q</em></span>
+with <span class="math inline"><em>i</em></span> between <span
+class="math inline">0</span> and <span
+class="math inline"><em>λ</em></span>:</p>
+<p><span
+class="math display"><em>f</em><sub><em>i</em> + <em>j</em>, <em>Q</em></sub> = <em>f</em><sub><em>i</em>, <em>Q</em></sub> × <em>f</em><sub><em>j</em>, <em>Q</em></sub> × <em>l</em><sub><em>i</em>, <em>j</em>, <em>Q</em></sub> ÷ <em>v</em><sub><em>i</em> + <em>j</em>, <em>Q</em></sub></span></p>
+<p>With <span
+class="math inline"><em>l</em><sub><em>i</em>, <em>j</em>, <em>Q</em></sub> ÷ <em>v</em><sub><em>i</em> + <em>j</em>, <em>Q</em></sub></span>
+being the ratio between a line passing through <span
+class="math inline"><em>i</em><em>Q</em>, <em>j</em><em>Q</em></span>
+and one (vertical) passing through <span
+class="math inline">(<em>i</em> + <em>j</em>)<em>Q</em></span>.</p>
+<p>When actually computing the algorithm, there are some optimizations
+to make:</p>
+<ul>
+<li><p>no need to evaluate vertical lines since they will always resolve
+to 1 after the final exponentiation.</p></li>
+<li><p>we twist to an EC over <span
+class="math inline"><em>F</em><sub>12</sub></span>.</p></li>
+</ul>
+<h2 id="final-exponentiation">Final Exponentiation</h2>
+<p>In order to compute an optimal Ate pairing, when need to raise the
+output of out miller loop to <span
+class="math inline"><em>q</em><sup>12</sup> − 1 ÷ <em>r</em></span>:</p>
+<p><span
+class="math display"><em>a</em><em>t</em><em>e</em>(<em>P</em>, <em>Q</em>) = <em>f</em><sub><em>λ</em>, <em>Q</em></sub>(<em>P</em>)<sup>(<em>q</em><sup>12</sup> − 1) ÷ <em>r</em></sup></span></p>
+<p>Since the power <span
+class="math inline">(<em>q</em><sup>12</sup> − 1) ÷ <em>r</em></span> is
+very large in bits, using a standard repeated multiplication to raise
+<span class="math inline"><em>f</em></span> would be inconvenient, thus
+we use the frobenius operator and the cyclotomic subgroup to split the
+computation in two parts.</p>
+<h3 id="forbenius-operator">Forbenius Operator</h3>
+<p>The frobenius operator allows us to perform <span
+class="math inline"><em>f</em> → <em>f</em><sup><em>q</em></sup></span>,
+and is computationally efficient since we work with finite fields. This
+way we can factorize the power into:</p>
+<p><span
+class="math display">(<em>q</em><sup>6</sup> − 1)(<em>q</em><sup>2</sup> + 1) × (<em>q</em><sup>4</sup> − <em>q</em><sup>2</sup> + 1 ÷ <em>r</em>)</span></p>
+<p>and use the frobenius operator to obtain:</p>
+<p><span
+class="math display"><em>f</em><sub><em>f</em><em>r</em><em>o</em><em>b</em><em>e</em><em>n</em><em>i</em><em>u</em><em>s</em></sub><sup>(<em>q</em><sup>6</sup> − 1)(<em>q</em><sup>2</sup> + 1)</sup></span></p>
+<h3 id="cyclomatic-subgroup">cyclomatic subgroup</h3>
+<p>We now have to compute <span
+class="math inline"><em>f</em><sub><em>f</em><em>r</em><em>o</em><em>b</em><em>e</em><em>n</em><em>i</em><em>u</em><em>s</em></sub><sup>(<em>q</em><sup>4</sup> − <em>q</em><sup>2</sup> + 1 ÷ <em>r</em>)</sup></span>,
+to do so we do:</p>
+<p><span
+class="math display"><em>f</em><sub><em>f</em><em>i</em><em>n</em><em>a</em><em>l</em></sub> = <em>f</em><sub></sub><sup><em>λ</em><sub>0</sub></sup> × (<em>f</em><sub></sub><sup><em>λ</em><sub>1</sub></sup>)<sup><em>q</em></sup> × (<em>f</em><sub></sub><sup><em>λ</em><sub>2</sub></sup>)<sup><em>q</em><sup>2</sup></sup> × (<em>f</em><sub></sub><sup><em>λ</em><sub>3</sub></sup>)<sup><em>q</em><sup>3</sup></sup></span></p>

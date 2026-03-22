@@ -1,0 +1,85 @@
+<p><code>16 october 2022</code></p>
+<h1 id="introduction">Introduction</h1>
+<p>In this small post, I’ll share the code of a Lottery Smart Contract I
+built with Soroban: Stellar’s smart contract platform. This is the
+second time I write about Soroban, check the first one <a
+href="https://heytdep.github.io/comp_posts/6)--pub)--Vault-smart-contract-with-Soroban/post.html">here</a>,
+where I talk about creating a Vault smart contract while going through
+every step I make in the development.</p>
+<p>On the other hand, in this post I’ll just extern how the contract
+works. By following the other article and by fiddling a bit with the
+source code you should be able to explore the contract thorough.</p>
+<h1 id="contract-workflow">Contract Workflow</h1>
+<p>A lottery is a perfect example of showcasing the potential of smart
+contracts: transparency in the code and in its execution + ease of
+transferring assets. To create a lottery smart contract, we need it to
+do three things:</p>
+<ul>
+<li><p>Set up the lottery <span class="math inline">→</span> the admin,
+which coin/token to accept as payment, how many winners there will be,
+how much will a lottery ticket cost (in terms of the accepted
+coin/token)</p></li>
+<li><p>Buying the ticket <span class="math inline">→</span> swapping the
+required amount of the accepted token for a lottery ticket, thus a
+possiblity of winning.</p></li>
+<li><p>Running the lottery <span class="math inline">→</span> When the
+admin wants (or when a certain condition is triggered), the lottery
+contract will randomly select and reward as many winners as the admin
+defined when setting up the lottery.</p></li>
+</ul>
+<p>This is a summary of what we are going to do below, rememeber that
+reading the quickstart examples in the <a
+href="https://soroban.stellar.org/docs/">Soroban docs</a> will make
+understanding this article easier.</p>
+<h1 id="fastrand">Fastrand</h1>
+<p>While for the vault contract I haven’t used other crates besides the
+soroban sdk and its auth helpers, you’ll notice that the
+<code>Cargo.toml</code> file for this contract uses
+<code>fastrand</code>, which the contract uses to generate random
+numbers for our winners. This is a good choice since we don’t need
+cryptographically secure numbers and this crate is very light and has 0
+dependencies.</p>
+<pre><code>[dependencies]
+soroban-sdk = &quot;0.1.0&quot;
+soroban-auth = &quot;0.1.0&quot;
+fastrand = &quot;1.8.0&quot;</code></pre>
+<h1 id="testing-the-contract">Testing the contract</h1>
+<p><strong><a
+href="https://github.com/Xycloo/soroban-lottery-contract">This is the
+repo</a></strong> of the contract.</p>
+<pre><code>&gt; git clone https://github.com/Xycloo/soroban-lottery-contract
+&gt; cd soroban-lottery-contract
+&gt; cargo test
+   Compiling soroban-vault-contract v0.0.0 (/home/tommasodeponti/Desktop/soroban-lottery-contract)
+    Finished test [unoptimized + debuginfo] target(s) in 2.19s
+     Running unittests src/lib.rs (target/debug/deps/soroban_vault_contract-3af336ea264d8fce)
+
+running 2 tests
+test test::test ... ok
+
+
+BALANCES
+user1: 996
+user2: 995
+user3: 995 
+user4: 995 
+user5: 1017
+user6: 1017 
+user7: 995
+user7: 995
+user9: 995
+
+test test::test_sequence ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests soroban-vault-contract
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+</code></pre>
+<p> </p>
+<p> </p>
+<p>contact: <a
+href="mailto:tommasodeponti@zohomail.eu">tommasodeponti@zohomail.eu</a></p>
