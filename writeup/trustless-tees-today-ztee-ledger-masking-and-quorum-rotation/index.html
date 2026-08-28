@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/styles/idea.min.css">
+<link href="/index.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/highlight.min.js"></script>
+<!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "e9adb517193447a3a9c4d5064ffa2550"}'></script><!-- End Cloudflare Web Analytics -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/rust.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/languages/bash.min.js"></script>
+<script>
+window.MathJax = {
+    startup: {
+        typeset: false
+    }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+fetch("./content.html").then(resp => resp.text().then(content => {
+    const post = document.createElement("div");
+    post.innerHTML = content;
+    document.getElementById("post").appendChild(post);
+    hljs.highlightAll();
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise();
+    }
+}));
+</script>
+<style>
+code {
+    background-color: #e4e4e4;
+    padding: 2px;
+    border-radius: 5px;
+    max-height: 800px;
+}
+#post {
+    max-width: 720px;
+    font-family: Georgia, 'Times New Roman', serif;
+}
+#post p, #post ol, #post li {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #333;
+}
+#post h1, #post h2, #post h3, #post h4 {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-weight: 700;
+}
+#post h1 { font-size: 1.4rem; }
+#post h2 { font-size: 1.2rem; }
+#post h3 { font-size: 1.05rem; }
+#post blockquote p {
+    font-size: 13px;
+}
+.doc-tag {
+    font-size: 0.7rem;
+    color: #999;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+.title {
+    font-size: 1.5rem;
+    font-family: Georgia, 'Times New Roman', serif;
+}
+</style>
+</head>
+<body>
+<div id="post">
+<h4><a href="/">back</a></h4>
+
+<h1 class="title">Trustless TEEs Today: ZTEE Ledger, Masking and Quorum Rotation</h1>
+</div>
+</body>
+</html>

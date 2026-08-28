@@ -77,7 +77,7 @@ fn get_drafts() -> Vec<PathBuf> {
             extract_numeric_prefix(a_filename),
             extract_numeric_prefix(b_filename),
         ) {
-            a_num.cmp(&b_num)
+            a_num.cmp(&b_num).then_with(|| a_filename.cmp(b_filename))
         } else {
             a_filename.cmp(b_filename)
         }
